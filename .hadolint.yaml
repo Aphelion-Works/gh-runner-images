@@ -1,0 +1,4 @@
+# OS packages are deliberately not version-pinned: images are rebuilt weekly to
+# pick up security updates, and Ubuntu removes old versions from its mirrors.
+ignored:
+  - DL3008

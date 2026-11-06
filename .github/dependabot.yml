@@ -1,0 +1,12 @@
+# Keeps the GitHub Actions used by the workflow up to date (weekly PRs).
+# The runner, yq, Ubuntu packages and Docker Engine are picked up by the daily
+# image build instead; lint tool pins live in .github/scripts/install-lint-tools.sh.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

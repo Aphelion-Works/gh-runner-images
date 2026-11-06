@@ -1,0 +1,196 @@
+# Builds, tests, scans and publishes the runner images.
+#
+#   pull requests   lint, build and test every image; publish nothing
+#   main, daily     same, then publish to ghcr.io with provenance and SBOM
+#                   attestations, and report vulnerabilities to code scanning
+#
+# Runs on the org's own OVH runners. If a bad image ever breaks them, run this
+# workflow by hand with runner=github to rebuild on GitHub's runners.
+#
+# The daily run picks up new runner releases the same day. OS packages are
+# refreshed weekly (OS_REFRESH = ISO week), so on most days only the small
+# runner layer can change and hosts that pull daily download little.
+name: Images
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 1 * * *"   # 01:17 UTC, before gh-runners hosts pull (03:30 UTC)
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: Where to run
+        type: choice
+        options: [ovh, github]
+        default: ovh
+
+permissions:
+  contents: read
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE: ghcr.io/aphelion-works/gh-runner-images
+
+jobs:
+  lint:
+    runs-on: ${{ inputs.runner == 'github' && 'ubuntu-24.04' || fromJSON('["self-hosted","ovh"]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install CI tools
+        run: .github/scripts/install-ci-tools.sh
+      - name: shellcheck
+        run: shellcheck -S style scripts/*.sh tests/*.sh tests/fake-runner/*.sh rootfs/usr/local/bin/entrypoint.sh .github/scripts/*.sh
+      - name: hadolint
+        run: hadolint Dockerfile
+      - name: actionlint
+        run: actionlint
+
+  image:
+    needs: lint
+    runs-on: ${{ inputs.runner == 'github' && 'ubuntu-24.04' || fromJSON('["self-hosted","ovh"]') }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: ubuntu-24.04, ubuntu: "24.04", variant: base, image_os: ubuntu24 }
+          - { name: ubuntu-24.04-tools, ubuntu: "24.04", variant: tools, image_os: ubuntu24 }
+          - { name: ubuntu-26.04, ubuntu: "26.04", variant: base, image_os: ubuntu26 }
+    env:
+      PUBLISH: ${{ github.event_name != 'pull_request' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install CI tools
+        run: .github/scripts/install-ci-tools.sh
+
+      - name: Resolve versions
+        id: v
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          scripts/resolve-versions.sh | tee -a "$GITHUB_OUTPUT"
+          echo "OS_REFRESH=$(date -u +%G-W%V)" | tee -a "$GITHUB_OUTPUT"
+          echo "DATE=$(date -u +%Y%m%d)" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Collect build arguments
+        id: args
+        env:
+          UBUNTU: ${{ matrix.ubuntu }}
+          VARIANT: ${{ matrix.variant }}
+          IMAGE_OS: ${{ matrix.image_os }}
+          OS_REFRESH: ${{ steps.v.outputs.OS_REFRESH }}
+          RUNNER_VERSION: ${{ steps.v.outputs.RUNNER_VERSION }}
+          RUNNER_SHA256_AMD64: ${{ steps.v.outputs.RUNNER_SHA256_AMD64 }}
+          RUNNER_SHA256_ARM64: ${{ steps.v.outputs.RUNNER_SHA256_ARM64 }}
+          YQ_VERSION: ${{ steps.v.outputs.YQ_VERSION }}
+          YQ_SHA256_AMD64: ${{ steps.v.outputs.YQ_SHA256_AMD64 }}
+          YQ_SHA256_ARM64: ${{ steps.v.outputs.YQ_SHA256_ARM64 }}
+        run: |
+          {
+            echo "list<<EOF"
+            echo "UBUNTU_VERSION=$UBUNTU"
+            for k in VARIANT IMAGE_OS OS_REFRESH RUNNER_VERSION RUNNER_SHA256_AMD64 RUNNER_SHA256_ARM64 \
+                     YQ_VERSION YQ_SHA256_AMD64 YQ_SHA256_ARM64; do
+              echo "$k=${!k}"
+            done
+            echo "EOF"
+          } >>"$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          pull: true
+          load: true
+          provenance: false
+          tags: local/${{ matrix.name }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          build-args: ${{ steps.args.outputs.list }}
+
+      - name: Test
+        env:
+          EXPECTED_RUNNER_VERSION: ${{ steps.v.outputs.RUNNER_VERSION }}
+          NAME: ${{ matrix.name }}
+          VARIANT: ${{ matrix.variant }}
+        run: tests/test-image.sh "local/$NAME" "$VARIANT"
+
+      # Reported, not enforced: Ubuntu always has some open CVEs, and failing
+      # here would also block runner updates. Fixable HIGH/CRITICAL findings
+      # show up under Security → Code scanning.
+      - name: Scan for vulnerabilities
+        env:
+          NAME: ${{ matrix.name }}
+        run: |
+          trivy image --quiet --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL \
+            --format sarif --output trivy.sarif "local/$NAME"
+          trivy image --quiet --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL "local/$NAME" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          trivy image --quiet --format spdx-json --output sbom.spdx.json "local/$NAME"
+
+      - name: Upload vulnerability report
+        if: env.PUBLISH == 'true'
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-${{ matrix.name }}
+
+      - name: Log in to ghcr.io
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # Same inputs as the tested build, so every layer comes from its cache.
+      - name: Publish
+        if: env.PUBLISH == 'true'
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: |
+            ${{ env.IMAGE }}:${{ matrix.name }}
+            ${{ env.IMAGE }}:${{ matrix.name }}-${{ steps.v.outputs.RUNNER_VERSION }}
+            ${{ env.IMAGE }}:${{ matrix.name }}-${{ steps.v.outputs.RUNNER_VERSION }}-${{ steps.v.outputs.DATE }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          build-args: ${{ steps.args.outputs.list }}
+
+      - name: Attest build provenance
+        if: env.PUBLISH == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest SBOM
+        if: env.PUBLISH == 'true'
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          sbom-path: sbom.spdx.json
+          push-to-registry: true

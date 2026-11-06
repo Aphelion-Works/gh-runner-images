@@ -1,0 +1,32 @@
+# CodeQL analysis of the GitHub Actions workflows (the only language in this
+# repo CodeQL supports). Findings go to Security → Code scanning.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "41 2 * * 1"   # weekly, Monday 02:41 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: [self-hosted, ovh]
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: actions
+          build-mode: none
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:actions
