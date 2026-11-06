@@ -8,10 +8,15 @@
 # runner starts, so jobs never see the registration token.
 #
 # No arguments: register with RUNNER_TOKEN, then run the runner.
+# RUNNER_JITCONFIG: skip registration and run `run.sh --jitconfig`. Extra
+#   arguments are ignored in this mode; the container still starts the runner.
 # Arguments:    run them as `runner` instead (debugging, tests), e.g.
 #   docker run --rm --privileged -e START_DOCKER_SERVICE=true IMAGE docker info
 #
 # Settings (environment variables):
+#   RUNNER_JITCONFIG      encoded one-job JIT config. When set, registration is
+#                         skipped and this value is passed to run.sh --jitconfig,
+#                         then removed from the environment.
 #   RUNNER_TOKEN          registration token (required to register)
 #   RUNNER_SCOPE          org or repo (default: org when ORG_NAME is set, else repo)
 #   ORG_NAME | REPO_URL   where to register (REPO_URL is the repo's full URL)
@@ -33,6 +38,10 @@
 #                                     removed by GitHub
 # Refused on purpose: ACCESS_TOKEN, APP_ID, APP_PRIVATE_KEY, APP_LOGIN. Long-lived
 # credentials stay on the host; only a registration token enters the container.
+# With RUNNER_JITCONFIG, registration settings (including RUNNER_TOKEN) are
+# refused because they are part of the JIT config, and ACCESS_TOKEN and every
+# APP_* variable are refused too. Only the JIT config enters, and it is removed
+# before run.sh starts.
 # =============================================================================
 set -euo pipefail
 
@@ -42,6 +51,12 @@ SETTINGS=(RUNNER_TOKEN RUNNER_SCOPE ORG_NAME REPO_URL LABELS RUNNER_GROUP RUNNER
   RUNNER_NAME_PREFIX RANDOM_RUNNER_SUFFIX RUNNER_WORKDIR EPHEMERAL DISABLE_AUTO_UPDATE
   NO_DEFAULT_LABELS START_DOCKER_SERVICE GITHUB_HOST UNSET_CONFIG_VARS
   DISABLE_AUTOMATIC_DEREGISTRATION)
+# Refused when RUNNER_JITCONFIG is set: the JIT config already carries them.
+# START_DOCKER_SERVICE is not here (it still starts Docker). The compatibility
+# knobs UNSET_CONFIG_VARS and DISABLE_AUTOMATIC_DEREGISTRATION stay ignored.
+JIT_REGISTRATION=(RUNNER_TOKEN RUNNER_SCOPE ORG_NAME REPO_URL LABELS RUNNER_GROUP
+  RUNNER_NAME RUNNER_NAME_PREFIX RANDOM_RUNNER_SUFFIX RUNNER_WORKDIR EPHEMERAL
+  DISABLE_AUTO_UPDATE NO_DEFAULT_LABELS GITHUB_HOST)
 
 log() { printf '[entrypoint] %s\n' "$*"; }
 die() { printf '[entrypoint] error: %s\n' "$*" >&2; exit 1; }
@@ -76,6 +91,42 @@ start_docker() {
 
 random_suffix() {
   (set +o pipefail; tr -dc 'A-Za-z0-9' </dev/urandom | head -c 13)
+}
+
+# Variable names currently set that start with the given prefix.
+vars_with_prefix() {  # <prefix>
+  compgen -v "$1" || true
+}
+
+refuse_jit_conflicts() {
+  local v name
+  for v in "${JIT_REGISTRATION[@]}"; do
+    [[ -z "${!v:-}" ]] || die "${v} is part of the JIT config and is not accepted in JIT mode"
+  done
+  [[ -z "${ACCESS_TOKEN:-}" ]] || die "ACCESS_TOKEN is not accepted in JIT mode"
+  while IFS= read -r name; do
+    [[ -n "$name" && -n "${!name:-}" ]] || continue
+    die "${name} is not accepted in JIT mode"
+  done < <(vars_with_prefix APP_)
+}
+
+unset_app_vars() {
+  local name
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
+    unset "$name"
+  done < <(vars_with_prefix APP_)
+}
+
+run_jit() {
+  local jit="${RUNNER_JITCONFIG}"
+  refuse_jit_conflicts
+  if is_true "${START_DOCKER_SERVICE:-false}"; then start_docker; fi
+  cd "$RUNNER_HOME"
+  log "starting the runner with a JIT config"
+  unset "${SETTINGS[@]}" RUNNER_JITCONFIG ACCESS_TOKEN
+  unset_app_vars
+  as_runner "${RUNNER_HOME}/run.sh" --jitconfig "$jit"
 }
 
 register_args() {  # fills the global ARGS for config.sh
@@ -114,6 +165,8 @@ register_args() {  # fills the global ARGS for config.sh
 
 main() {
   [[ "$(id -u)" -eq 0 ]] || die "start the container as root (the default); jobs run as '${RUNNER_USER}'"
+  # JIT mode wins over extra arguments: those are the debug path below.
+  if [[ -n "${RUNNER_JITCONFIG:-}" ]]; then run_jit; fi
   local v
   for v in ACCESS_TOKEN APP_ID APP_PRIVATE_KEY APP_LOGIN; do
     [[ -z "${!v:-}" ]] || die "$v is not accepted: pass a short-lived RUNNER_TOKEN instead"
