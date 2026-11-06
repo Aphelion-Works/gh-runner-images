@@ -1,5 +1,8 @@
 # gh-runner-images
 
+[![Images](https://github.com/Aphelion-Works/gh-runner-images/actions/workflows/images.yml/badge.svg)](https://github.com/Aphelion-Works/gh-runner-images/actions/workflows/images.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Aphelion-Works/gh-runner-images/badge)](https://scorecard.dev/viewer/?uri=github.com/Aphelion-Works/gh-runner-images)
+
 Container images for **single-use, self-hosted GitHub Actions runners**, built
 from GitHub's official [runner release](https://github.com/actions/runner/releases)
 on Ubuntu and rebuilt automatically. Made for gh-runners, which runs one container per job
@@ -148,8 +151,9 @@ gh attestation verify oci://ghcr.io/aphelion-works/gh-runner-images:ubuntu-24.04
   - CodeQL analyses the workflows.
   - OpenSSF Scorecard checks the repository's practices.
   - Dependency review checks pull requests.
-- **Where CI runs:** CI runs on the org's own self-hosted runners. Workflows from
-  outside contributors need approval before they run.
+- **Where CI runs:** CI runs on GitHub's own runners, never on the runners that
+  use these images. Workflows from outside contributors need approval before
+  they run.
 - **Reporting:** see [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ## Development
@@ -187,6 +191,3 @@ scripts/resolve-versions.sh     newest runner/yq versions and their SHA-256s
 scripts/build.sh                local build of one image
 tests/test-image.sh             image tests (CI runs them before publishing)
 ```
-
-If a broken image ever stops the self-hosted runners, run the **Images**
-workflow by hand with `runner: github` to rebuild on GitHub's runners.

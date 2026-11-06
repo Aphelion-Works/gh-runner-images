@@ -1,5 +1,0 @@
-# Labels of the org's own runners (gh-runners), so actionlint accepts them.
-self-hosted-runner:
-  labels:
-    - ovh
-    - uk

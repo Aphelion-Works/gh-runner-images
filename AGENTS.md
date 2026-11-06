@@ -22,7 +22,8 @@
 - **Linters:** shell scripts must pass `shellcheck -S style`, the Dockerfile
   `hadolint`, and workflows `actionlint`. The README's "Development" section shows
   how to run them.
-- **CI runs on the org's self-hosted runners** (`[self-hosted, ovh]`). Keep the
-  `runner: github` escape hatch in `images.yml` working.
+- **CI runs on GitHub's own runners** (`ubuntu-24.04`), never on the
+  self-hosted runners that use these images, so a broken image can't block its
+  own fix.
 - **Image tags are public names** that hosts depend on. Don't rename or remove one
   without a migration note in the README.

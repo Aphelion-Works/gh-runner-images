@@ -4,8 +4,8 @@
 #   main, daily     same, then publish to ghcr.io with provenance and SBOM
 #                   attestations, and report vulnerabilities to code scanning
 #
-# Runs on the org's own OVH runners. If a bad image ever breaks them, run this
-# workflow by hand with runner=github to rebuild on GitHub's runners.
+# Runs on GitHub's own runners (free for public repos), so the images are never
+# built by the runners that use them.
 #
 # The daily run picks up new runner releases the same day. OS packages are
 # refreshed weekly (OS_REFRESH = ISO week), so on most days only the small
@@ -19,12 +19,6 @@ on:
   schedule:
     - cron: "17 1 * * *"   # 01:17 UTC, before gh-runners hosts pull (03:30 UTC)
   workflow_dispatch:
-    inputs:
-      runner:
-        description: Where to run
-        type: choice
-        options: [ovh, github]
-        default: ovh
 
 permissions:
   contents: read
@@ -38,7 +32,7 @@ env:
 
 jobs:
   lint:
-    runs-on: ${{ inputs.runner == 'github' && 'ubuntu-24.04' || fromJSON('["self-hosted","ovh"]') }}
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -54,7 +48,7 @@ jobs:
 
   image:
     needs: lint
-    runs-on: ${{ inputs.runner == 'github' && 'ubuntu-24.04' || fromJSON('["self-hosted","ovh"]') }}
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write

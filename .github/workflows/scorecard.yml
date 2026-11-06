@@ -1,8 +1,9 @@
 # OpenSSF Scorecard: supply-chain security checks (pinned dependencies, token
-# permissions, branch protection…). Results go to Security → Code scanning.
+# permissions, branch protection…). Results go to Security → Code scanning and
+# to the public Scorecard API (the badge in the README).
 #
-# Runs on the org's OVH runners, so results aren't published to the public
-# Scorecard API (that requires GitHub's own runners) and there's no badge.
+# Publishing restricts this workflow: no top-level env or defaults, no write
+# permissions at the top, and only approved actions in the job.
 name: Scorecard
 
 on:
@@ -16,11 +17,10 @@ permissions: read-all
 
 jobs:
   analysis:
-    runs-on: [self-hosted, ovh]
+    runs-on: ubuntu-24.04
     permissions:
-      contents: read
-      actions: read
       security-events: write
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -29,7 +29,7 @@ jobs:
         with:
           results_file: results.sarif
           results_format: sarif
-          publish_results: false
+          publish_results: true
       - uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: results.sarif
