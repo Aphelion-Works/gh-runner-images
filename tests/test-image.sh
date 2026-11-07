@@ -105,6 +105,86 @@ expect_error "GitHub App key refused" "APP_PRIVATE_KEY is not accepted" -e RUNNE
 expect_error "access token refused" "ACCESS_TOKEN is not accepted" -e RUNNER_TOKEN=t -e ORG_NAME=x -e ACCESS_TOKEN=k
 expect_error "Docker without --privileged fails clearly" "did not start" -e START_DOCKER_SERVICE=true -e RUNNER_TOKEN=t -e ORG_NAME=x
 
+echo "-- JIT mode"
+check_jit_run() {  # <label>: register/run already wrote $TMP/out
+  local label="$1" r="$TMP/out/run.txt"
+  if [[ ! -f "$r" ]]; then
+    fail "$label: run.sh was called" "$(cat "$TMP/log" 2>/dev/null || true)"
+    return
+  fi
+  check "$label: run.sh runs as runner (uid 1001)" grep -qE '^uid=1001 groups=.*\bdocker\b' "$r"
+  check "$label: run.sh receives --jitconfig" has_line "$r" "arg=--jitconfig"
+  check "$label: run.sh receives the JIT config value" has_line "$r" "arg=jit-test-config"
+  check "$label: run.sh gets only the JIT arguments" bash -c "[[ \"\$(grep -c '^arg=' '$r')\" -eq 2 ]]"
+  check "$label: config.sh is not run" test ! -e "$TMP/out/config.txt"
+  check "$label: RUNNER_JITCONFIG is not in the environment" bash -c "! grep -q '^RUNNER_JITCONFIG=' '$TMP/out/run-env.txt'"
+  check "$label: the JIT config value is not in the environment" bash -c "! grep -qF jit-test-config '$TMP/out/run-env.txt'"
+  check "$label: START_DOCKER_SERVICE is not in the environment" bash -c "! grep -q '^START_DOCKER_SERVICE=' '$TMP/out/run-env.txt'"
+  check "$label: registration settings are not in the environment" \
+    bash -c "! grep -qE '^(RUNNER_TOKEN|ORG_NAME|LABELS|RUNNER_SCOPE|EPHEMERAL|UNSET_CONFIG_VARS|DISABLE_AUTOMATIC_DEREGISTRATION)=' '$TMP/out/run-env.txt'"
+  check "$label: HOME is the runner's" has_line "$TMP/out/run-env.txt" "HOME=/home/runner"
+}
+register -e RUNNER_JITCONFIG=jit-test-config \
+  -e UNSET_CONFIG_VARS=true -e DISABLE_AUTOMATIC_DEREGISTRATION=true >"$TMP/log" 2>&1 \
+  || fail "JIT entrypoint exits 0" "$(cat "$TMP/log")"
+check_jit_run "JIT"
+
+echo "-- JIT mode ignores extra arguments"
+rm -rf "$TMP/out"; mkdir -p "$TMP/out"; chmod 777 "$TMP/out"
+if out="$(run -v "$TMP/out:/out" \
+    -v "$PWD/fake-runner/config.sh:/home/runner/config.sh:ro" \
+    -v "$PWD/fake-runner/run.sh:/home/runner/run.sh:ro" \
+    -e RUNNER_JITCONFIG=jit-test-config \
+    "$IMAGE" id -u 2>&1)"; then
+  printf '%s\n' "$out" >"$TMP/log"
+  check_jit_run "JIT with extra arguments"
+else
+  fail "JIT mode with extra arguments exits 0" "$out"
+fi
+
+echo "-- JIT refusals"
+jit_setting_refused() {  # <variable> <value>
+  expect_error "$1 is refused in JIT mode" \
+    "$1 is part of the JIT config and is not accepted in JIT mode" \
+    -e RUNNER_JITCONFIG=jit-test-config -e "$1=$2"
+}
+jit_setting_refused RUNNER_TOKEN test-registration-token
+jit_setting_refused RUNNER_SCOPE org
+jit_setting_refused ORG_NAME Acme-Platform
+jit_setting_refused REPO_URL https://github.com/octo-user/demo
+jit_setting_refused LABELS ci
+jit_setting_refused RUNNER_GROUP ci
+jit_setting_refused RUNNER_NAME runner-acme
+jit_setting_refused RUNNER_NAME_PREFIX host-acme
+jit_setting_refused RANDOM_RUNNER_SUFFIX true
+jit_setting_refused RUNNER_WORKDIR /_work/acme
+jit_setting_refused EPHEMERAL true
+jit_setting_refused DISABLE_AUTO_UPDATE true
+jit_setting_refused NO_DEFAULT_LABELS true
+jit_setting_refused GITHUB_HOST ghe.example
+expect_error "ACCESS_TOKEN refused in JIT mode" "ACCESS_TOKEN is not accepted in JIT mode" \
+  -e RUNNER_JITCONFIG=jit-test-config -e ACCESS_TOKEN=k
+expect_error "APP_PRIVATE_KEY refused in JIT mode" "APP_PRIVATE_KEY is not accepted in JIT mode" \
+  -e RUNNER_JITCONFIG=jit-test-config -e APP_PRIVATE_KEY=k
+expect_error "APP_ID refused in JIT mode" "APP_ID is not accepted in JIT mode" \
+  -e RUNNER_JITCONFIG=jit-test-config -e APP_ID=1
+expect_error "APP_LOGIN refused in JIT mode" "APP_LOGIN is not accepted in JIT mode" \
+  -e RUNNER_JITCONFIG=jit-test-config -e APP_LOGIN=octo-user
+expect_error "APP_CLIENT_ID refused in JIT mode" "APP_CLIENT_ID is not accepted in JIT mode" \
+  -e RUNNER_JITCONFIG=jit-test-config -e APP_CLIENT_ID=k
+# Compatibility knobs are not registration settings: the case above already
+# starts the runner with them set. A registration setting together with a knob
+# is still refused.
+expect_error "ORG_NAME still refused when a compatibility knob is set" \
+  "ORG_NAME is part of the JIT config and is not accepted in JIT mode" \
+  -e RUNNER_JITCONFIG=jit-test-config -e UNSET_CONFIG_VARS=true -e ORG_NAME=Acme-Labs
+
+echo "-- JIT mode with Docker"
+register --privileged --mount type=volume,dst=/var/lib/docker --memory 2g \
+  -e START_DOCKER_SERVICE=true -e RUNNER_JITCONFIG=jit-test-config >"$TMP/log" 2>&1 \
+  || fail "JIT with Docker exits 0" "$(cat "$TMP/log")"
+check_jit_run "JIT with Docker"
+
 echo "-- Docker in the job"
 dind() { run --privileged --mount type=volume,dst=/var/lib/docker -e START_DOCKER_SERVICE=true --memory 2g "$IMAGE" "$@"; }
 check "runner can use the job's Docker without sudo" dind docker info --format '{{.ServerVersion}}'

@@ -78,7 +78,7 @@ nothing else changes.
 |---|---|---|
 | Runner | official release | official release, SHA-256 checked |
 | Jobs run as | root | `runner` (uid 1001) with passwordless sudo |
-| Credentials accepted | registration token, PAT, GitHub App key | registration token only |
+| Credentials accepted | registration token, PAT, GitHub App key | registration token, or `RUNNER_JITCONFIG` |
 | Extra tools | many (AWS CLI, PowerShell, Podman…) | `-tools` variant (list above) |
 | Provenance | none | signed build provenance and SBOM attestations |
 
@@ -100,7 +100,7 @@ Get a registration token from
 
 | Variable | Meaning |
 |---|---|
-| `RUNNER_TOKEN` | registration token (**required**). Jobs never see it. |
+| `RUNNER_TOKEN` | registration token (required to register). Jobs never see it. Refused when `RUNNER_JITCONFIG` is set. |
 | `RUNNER_SCOPE` | `org` or `repo` (default: `org` when `ORG_NAME` is set) |
 | `ORG_NAME` / `REPO_URL` | where to register; `REPO_URL` is the full repo URL |
 | `LABELS` | extra labels, comma separated |
@@ -113,16 +113,20 @@ Get a registration token from
 | `NO_DEFAULT_LABELS` | `true`: no `self-hosted`, `Linux`, `X64` labels |
 | `START_DOCKER_SERVICE` | `true`: start Docker for jobs (needs `--privileged`) |
 | `GITHUB_HOST` | default `github.com` |
+| `RUNNER_JITCONFIG` | When set, skip registration and run `run.sh --jitconfig`. Registration settings and `RUNNER_TOKEN`, `ACCESS_TOKEN`, and `APP_*` are refused (registration settings are part of the JIT config and are not accepted in JIT mode). `START_DOCKER_SERVICE=true` still starts Docker. The JIT config is removed from the environment before the runner starts. |
 
 `UNSET_CONFIG_VARS` and `DISABLE_AUTOMATIC_DEREGISTRATION` are accepted and
-ignored, for compatibility. These settings are always removed before the runner
-starts, and the image never deregisters, because single-use runners are removed
-by GitHub. `ACCESS_TOKEN`, `APP_ID`, `APP_PRIVATE_KEY` and `APP_LOGIN` are
-refused on purpose: long-lived credentials stay on the host, and only a
-one-hour registration token enters the container.
+ignored, for compatibility, including in JIT mode. These settings are always
+removed before the runner starts, and the image never deregisters, because
+single-use runners are removed by GitHub. `ACCESS_TOKEN`, `APP_ID`,
+`APP_PRIVATE_KEY` and `APP_LOGIN` are refused on purpose: long-lived credentials
+stay on the host, and only a one-hour registration token enters the container
+on the registration path. In JIT mode every `APP_*` variable is refused, and
+the container receives only `RUNNER_JITCONFIG`.
 
 Any command given after the image name runs as `runner` instead of registering,
-which is useful for checking an image:
+which is useful for checking an image. When `RUNNER_JITCONFIG` is set, that
+command is ignored and the runner starts with the JIT config:
 
 ```bash
 docker run --rm --privileged -e START_DOCKER_SERVICE=true IMAGE docker info
