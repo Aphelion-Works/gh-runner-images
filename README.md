@@ -35,6 +35,21 @@ Each tag also exists pinned:
 
 There is no `latest`: pick an Ubuntu release explicitly.
 
+### macOS
+
+`ghcr.io/aphelion-works/gh-runner-images:macos-15` and `:macos-26` are macOS
+VMs, not containers. A Mac host pulls one with Lume and clones it for each
+job. They are built by `scripts/build-macos-image.sh` on an Apple Silicon Mac
+and pushed to this same registry. GitHub-hosted runners cannot build them:
+a macOS guest only boots on Apple hardware. The disk is not stored in git.
+
+| Tag | Guest |
+|---|---|
+| `macos-15` | macOS 15, the Actions runner, one job then shutdown |
+| `macos-26` | macOS 26, the same |
+
+Neither tag includes Xcode.
+
 ### Updates
 
 [`images.yml`](.github/workflows/images.yml) runs daily at 01:17 UTC. It:
