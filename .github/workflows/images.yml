@@ -1,15 +1,7 @@
-# Builds, tests, scans and publishes the runner images.
-#
-#   pull requests   lint, build and test every image; publish nothing
-#   main, daily     same, then publish to ghcr.io with provenance and SBOM
-#                   attestations, and report vulnerabilities to code scanning
-#
-# Runs on GitHub's own runners (free for public repos), so the images are never
-# built by the runners that use them.
-#
-# The daily run picks up new runner releases the same day. OS packages are
-# refreshed weekly (OS_REFRESH = ISO week), so on most days only the small
-# runner layer can change and hosts that pull daily download little.
+# Builds, tests, scans and publishes the Linux runner images.
+# Pull requests publish nothing. main and the daily run publish to ghcr.io.
+# OS packages refresh weekly (OS_REFRESH is the ISO week).
+# Runs on GitHub-hosted runners, never on the runners that use these images.
 name: Images
 
 on:

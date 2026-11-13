@@ -2,46 +2,18 @@
 # =============================================================================
 # entrypoint.sh: start one GitHub Actions runner in this container.
 #
-# Starts as root only to run the job's own Docker daemon, then runs everything
-# else as the unprivileged `runner` user (passwordless sudo, like GitHub's own
-# runners). The runner's settings are removed from the environment before the
-# runner starts, so jobs never see the registration token.
+# Starts as root only to run the job's Docker daemon, then runs the runner as
+# the unprivileged `runner` user. Settings are removed from the environment
+# before the runner starts, so a job never sees the registration token.
 #
 # No arguments: register with RUNNER_TOKEN, then run the runner.
 # RUNNER_JITCONFIG: skip registration and run `run.sh --jitconfig`. Extra
-#   arguments are ignored in this mode; the container still starts the runner.
-# Arguments:    run them as `runner` instead (debugging, tests), e.g.
-#   docker run --rm --privileged -e START_DOCKER_SERVICE=true IMAGE docker info
+#   arguments are ignored. Registration settings, ACCESS_TOKEN, and APP_* are
+#   refused. The JIT config is removed before run.sh starts.
+# Arguments: run them as `runner` instead of registering.
 #
-# Settings (environment variables):
-#   RUNNER_JITCONFIG      encoded one-job JIT config. When set, registration is
-#                         skipped and this value is passed to run.sh --jitconfig,
-#                         then removed from the environment.
-#   RUNNER_TOKEN          registration token (required to register)
-#   RUNNER_SCOPE          org or repo (default: org when ORG_NAME is set, else repo)
-#   ORG_NAME | REPO_URL   where to register (REPO_URL is the repo's full URL)
-#   LABELS                extra labels, comma separated
-#   RUNNER_GROUP          runner group (default: Default)
-#   RUNNER_NAME           exact runner name; otherwise RUNNER_NAME_PREFIX (default:
-#                         the container's hostname) plus a random suffix
-#   RANDOM_RUNNER_SUFFIX  true (default) | false
-#   RUNNER_WORKDIR        default /_work/<runner name>
-#   EPHEMERAL             true: take one job, then exit
-#   DISABLE_AUTO_UPDATE   true: the runner doesn't update itself
-#   NO_DEFAULT_LABELS     true: don't add self-hosted, Linux, X64
-#   START_DOCKER_SERVICE  true: start a Docker daemon for jobs (needs --privileged)
-#   GITHUB_HOST           default github.com
-# Accepted for compatibility with myoung34/github-runner, and ignored:
-#   UNSET_CONFIG_VARS                 settings are always removed
-#   DISABLE_AUTOMATIC_DEREGISTRATION  this image never deregisters: a registration
-#                                     token can't, and single-use runners are
-#                                     removed by GitHub
-# Refused on purpose: ACCESS_TOKEN, APP_ID, APP_PRIVATE_KEY, APP_LOGIN. Long-lived
-# credentials stay on the host; only a registration token enters the container.
-# With RUNNER_JITCONFIG, registration settings (including RUNNER_TOKEN) are
-# refused because they are part of the JIT config, and ACCESS_TOKEN and every
-# APP_* variable are refused too. Only the JIT config enters, and it is removed
-# before run.sh starts.
+# ACCESS_TOKEN, APP_ID, APP_PRIVATE_KEY, and APP_LOGIN are refused. The
+# variable list is in the README.
 # =============================================================================
 set -euo pipefail
 
@@ -49,11 +21,9 @@ RUNNER_HOME=/home/runner
 RUNNER_USER=runner
 SETTINGS=(RUNNER_TOKEN RUNNER_SCOPE ORG_NAME REPO_URL LABELS RUNNER_GROUP RUNNER_NAME
   RUNNER_NAME_PREFIX RANDOM_RUNNER_SUFFIX RUNNER_WORKDIR EPHEMERAL DISABLE_AUTO_UPDATE
-  NO_DEFAULT_LABELS START_DOCKER_SERVICE GITHUB_HOST UNSET_CONFIG_VARS
-  DISABLE_AUTOMATIC_DEREGISTRATION)
+  NO_DEFAULT_LABELS START_DOCKER_SERVICE GITHUB_HOST)
 # Refused when RUNNER_JITCONFIG is set: the JIT config already carries them.
-# START_DOCKER_SERVICE is not here (it still starts Docker). The compatibility
-# knobs UNSET_CONFIG_VARS and DISABLE_AUTOMATIC_DEREGISTRATION stay ignored.
+# START_DOCKER_SERVICE is not here: it still starts Docker.
 JIT_REGISTRATION=(RUNNER_TOKEN RUNNER_SCOPE ORG_NAME REPO_URL LABELS RUNNER_GROUP
   RUNNER_NAME RUNNER_NAME_PREFIX RANDOM_RUNNER_SUFFIX RUNNER_WORKDIR EPHEMERAL
   DISABLE_AUTO_UPDATE NO_DEFAULT_LABELS GITHUB_HOST)

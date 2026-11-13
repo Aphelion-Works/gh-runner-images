@@ -1,17 +1,17 @@
 # gh-runner-images
 
 [![Images](https://github.com/Aphelion-Works/gh-runner-images/actions/workflows/images.yml/badge.svg)](https://github.com/Aphelion-Works/gh-runner-images/actions/workflows/images.yml)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Aphelion-Works/gh-runner-images/badge)](https://scorecard.dev/viewer/?uri=github.com/Aphelion-Works/gh-runner-images)
 
 Container images for **single-use, self-hosted GitHub Actions runners**, built
 from GitHub's official [runner release](https://github.com/actions/runner/releases)
 on Ubuntu and rebuilt automatically. Made for gh-runners, which runs one container per job
-under systemd. They work with any setup that does the same.
+under systemd.
 
 Each container registers one runner, takes one job, and exits. It brings its
 own Docker daemon, so `docker build`, service containers and `container:` jobs
 work and are wiped with the container. Jobs run as the non-root `runner` user
-(uid 1001) with passwordless `sudo`, as on GitHub's own runners.
+(uid 1001) with passwordless `sudo`. A command that needs root, such as
+`apt-get install`, has to use `sudo`.
 
 ## Images
 
@@ -46,10 +46,9 @@ stored in git.
 
 | Tag | Guest |
 |---|---|
-| `macos-26` | macOS 26.6.2, Xcode 27.1, the Actions runner, one job then shutdown. Published. |
-| `macos-15` | macOS 15.6.1, the Actions runner, one job then shutdown. No Xcode. Not published yet. |
+| `macos-26` | macOS 26.6.2, Xcode 27.1 at `/Applications/Xcode.app`, the Actions runner, one job then shutdown. Published. |
+| `macos-15` | macOS 15.6.1, the Actions runner, one job then shutdown. No Xcode. Published. |
 
-The published `macos-26` image has Xcode 27.1 at `/Applications/Xcode.app`.
 A signing certificate is not in the image. A job imports one, as on
 GitHub-hosted runners.
 
@@ -60,15 +59,10 @@ Mac on macOS 26 or newer.
 
 ### Updates
 
-[`images.yml`](.github/workflows/images.yml) runs daily at 01:17 UTC and
-publishes the three Linux images. It:
-
-1. builds each one with the newest runner release,
-2. tests it ([`tests/test-image.sh`](tests/test-image.sh)),
-3. scans it, and
-4. publishes it only if the tests pass.
-
-macOS images are published separately, from a Mac.
+[`images.yml`](.github/workflows/images.yml) runs daily at 01:17 UTC. It builds
+each Linux image with the newest runner release, tests it, scans it, and
+publishes it only if the tests pass. macOS images are published separately,
+from a Mac.
 [`macos-runner.yml`](.github/workflows/macos-runner.yml) runs weekly and opens
 an issue when `runner_version` in `scripts/build-macos-image.sh` is behind the
 latest actions/runner release. That is the signal to rebuild the macOS images.
@@ -79,16 +73,12 @@ that pull daily download little. GitHub stops sending jobs to runners more than
 30 days behind its latest release, and the daily build keeps the images well
 inside that.
 
-GitHub turns off scheduled workflows in public repositories after 60 days
-without a commit, and emails a warning first. Merging the weekly Dependabot pull
-requests is enough to keep the schedule running.
-
 ## Using with gh-runners
 
 In `/etc/gh-runners/runners.conf` on the host:
 
 ```bash
-RUNNER_IMAGE="ghcr.io/aphelion-works/gh-runner-images:ubuntu-24.04-tools"
+IMAGES="ghcr.io/aphelion-works/gh-runner-images:ubuntu-24.04-tools"
 ```
 
 Then refresh the image and restart the slots:
@@ -98,22 +88,7 @@ sudo gh-runners pull && sudo gh-runners apply
 ```
 
 A restart kills jobs that are running, so check `sudo gh-runners github` for busy
-runners first. The image accepts the settings gh-runners already passes, so
-nothing else changes.
-
-### Differences from `myoung34/github-runner`
-
-| | myoung34/github-runner | these images |
-|---|---|---|
-| Runner | official release | official release, SHA-256 checked |
-| Jobs run as | root | `runner` (uid 1001) with passwordless sudo |
-| Credentials accepted | registration token, PAT, GitHub App key | registration token, or `RUNNER_JITCONFIG` |
-| Extra tools | many (AWS CLI, PowerShell, Podman…) | `-tools` variant (list above) |
-| Provenance | none | Linux images: signed build provenance and an SBOM |
-
-Workflows that run root-only commands without `sudo`, such as `apt-get install`,
-need `sudo` added. AWS CLI, PowerShell and Podman aren't included: install them
-in the job if needed.
+runners first.
 
 ## Running it by hand
 
@@ -144,14 +119,11 @@ Get a registration token from
 | `GITHUB_HOST` | default `github.com` |
 | `RUNNER_JITCONFIG` | When set, skip registration and run `run.sh --jitconfig`. Registration settings and `RUNNER_TOKEN`, `ACCESS_TOKEN`, and `APP_*` are refused (registration settings are part of the JIT config and are not accepted in JIT mode). `START_DOCKER_SERVICE=true` still starts Docker. The JIT config is removed from the environment before the runner starts. |
 
-`UNSET_CONFIG_VARS` and `DISABLE_AUTOMATIC_DEREGISTRATION` are accepted and
-ignored, for compatibility, including in JIT mode. These settings are always
-removed before the runner starts, and the image never deregisters, because
-single-use runners are removed by GitHub. `ACCESS_TOKEN`, `APP_ID`,
-`APP_PRIVATE_KEY` and `APP_LOGIN` are refused on purpose: long-lived credentials
-stay on the host, and only a one-hour registration token enters the container
-on the registration path. In JIT mode every `APP_*` variable is refused, and
-the container receives only `RUNNER_JITCONFIG`.
+`ACCESS_TOKEN`, `APP_ID`, `APP_PRIVATE_KEY` and `APP_LOGIN` are refused.
+Long-lived credentials stay on the host, and only a one-hour registration
+token enters the container on the registration path. In JIT mode every `APP_*`
+variable is refused, and the container receives only `RUNNER_JITCONFIG`. The
+image never deregisters, because single-use runners are removed by GitHub.
 
 Any command given after the image name runs as `runner` instead of registering,
 which is useful for checking an image. When `RUNNER_JITCONFIG` is set, that
@@ -183,7 +155,6 @@ gh attestation verify oci://ghcr.io/aphelion-works/gh-runner-images:ubuntu-24.04
 - **Scanning:** findings appear under *Security → Code scanning*.
   - Trivy scans each Linux image.
   - CodeQL analyses the workflows.
-  - OpenSSF Scorecard checks the repository's practices.
   - Dependency review checks pull requests.
 - **Where CI runs:** CI runs on GitHub's own runners, never on the runners that
   use these images. Workflows from outside contributors need approval before
@@ -214,21 +185,6 @@ docker run --rm -i -v "$PWD/.hadolint.yaml:/.config/hadolint.yaml:ro" hadolint/h
 
 ```bash
 docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
-```
-
-```
-Dockerfile                      one file, two variants (VARIANT=base|tools)
-rootfs/usr/local/bin/entrypoint.sh   registers and starts the runner
-scripts/install-base.sh         OS packages, Docker Engine, runner user
-scripts/install-runner.sh       downloads and checks the runner release
-scripts/install-tools.sh        the -tools variant
-scripts/resolve-versions.sh     newest runner/yq versions and their SHA-256s
-scripts/build.sh                local build of one Linux image
-scripts/build-macos-image.sh    macOS VM build (a Mac with Lume; not run in CI)
-scripts/check-macos-runner.sh   compare that build's runner pin with the latest release
-macos/start-runner.sh           guest boot: read the JIT config, one job, shutdown
-macos/io.gh-runners.guest.plist guest LaunchDaemon for that script
-tests/test-image.sh             Linux image tests (CI runs them before publishing)
 ```
 
 A macOS build is `scripts/build-macos-image.sh macos-26`. The script installs

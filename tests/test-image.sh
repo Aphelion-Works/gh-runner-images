@@ -52,8 +52,7 @@ check "work directory is writable by runner" run "$IMAGE" touch /_work/x
 echo "-- registration (org)"
 register -e RUNNER_TOKEN=test-registration-token -e RUNNER_SCOPE=org -e ORG_NAME=Acme-Platform \
   -e LABELS=ovh,uk -e RUNNER_GROUP=ci -e RUNNER_NAME_PREFIX=host-acme-platform-1 \
-  -e RANDOM_RUNNER_SUFFIX=true -e EPHEMERAL=true -e DISABLE_AUTO_UPDATE=true \
-  -e UNSET_CONFIG_VARS=true -e DISABLE_AUTOMATIC_DEREGISTRATION=true >"$TMP/log" 2>&1 \
+  -e RANDOM_RUNNER_SUFFIX=true -e EPHEMERAL=true -e DISABLE_AUTO_UPDATE=true >"$TMP/log" 2>&1 \
   || fail "entrypoint exits 0" "$(cat "$TMP/log")"
 c="$TMP/out/config.txt"
 if [[ -f "$c" ]]; then
@@ -121,11 +120,10 @@ check_jit_run() {  # <label>: register/run already wrote $TMP/out
   check "$label: the JIT config value is not in the environment" bash -c "! grep -qF jit-test-config '$TMP/out/run-env.txt'"
   check "$label: START_DOCKER_SERVICE is not in the environment" bash -c "! grep -q '^START_DOCKER_SERVICE=' '$TMP/out/run-env.txt'"
   check "$label: registration settings are not in the environment" \
-    bash -c "! grep -qE '^(RUNNER_TOKEN|ORG_NAME|LABELS|RUNNER_SCOPE|EPHEMERAL|UNSET_CONFIG_VARS|DISABLE_AUTOMATIC_DEREGISTRATION)=' '$TMP/out/run-env.txt'"
+    bash -c "! grep -qE '^(RUNNER_TOKEN|ORG_NAME|LABELS|RUNNER_SCOPE|EPHEMERAL)=' '$TMP/out/run-env.txt'"
   check "$label: HOME is the runner's" has_line "$TMP/out/run-env.txt" "HOME=/home/runner"
 }
-register -e RUNNER_JITCONFIG=jit-test-config \
-  -e UNSET_CONFIG_VARS=true -e DISABLE_AUTOMATIC_DEREGISTRATION=true >"$TMP/log" 2>&1 \
+register -e RUNNER_JITCONFIG=jit-test-config >"$TMP/log" 2>&1 \
   || fail "JIT entrypoint exits 0" "$(cat "$TMP/log")"
 check_jit_run "JIT"
 
@@ -172,12 +170,6 @@ expect_error "APP_LOGIN refused in JIT mode" "APP_LOGIN is not accepted in JIT m
   -e RUNNER_JITCONFIG=jit-test-config -e APP_LOGIN=octo-user
 expect_error "APP_CLIENT_ID refused in JIT mode" "APP_CLIENT_ID is not accepted in JIT mode" \
   -e RUNNER_JITCONFIG=jit-test-config -e APP_CLIENT_ID=k
-# Compatibility knobs are not registration settings: the case above already
-# starts the runner with them set. A registration setting together with a knob
-# is still refused.
-expect_error "ORG_NAME still refused when a compatibility knob is set" \
-  "ORG_NAME is part of the JIT config and is not accepted in JIT mode" \
-  -e RUNNER_JITCONFIG=jit-test-config -e UNSET_CONFIG_VARS=true -e ORG_NAME=Acme-Labs
 
 echo "-- JIT mode with Docker"
 register --privileged --mount type=volume,dst=/var/lib/docker --memory 2g \
