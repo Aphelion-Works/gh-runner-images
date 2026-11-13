@@ -113,7 +113,7 @@ if [[ -z $xip ]]; then
   xip="${cache}/${xcode_file}"
   if [[ ! -f $xip ]]; then
     printf 'downloading %s\n' "$xcode_file"
-    curl -fL --retry 5 -o "$xip" "$xcode_url" \
+    curl --proto '=https' --tlsv1.2 -fL --retry 5 -o "$xip" "$xcode_url" \
       || die "could not download ${xcode_file}. Save the archive from a signed-in Apple developer session and set GH_RUNNERS_XCODE_XIP."
   fi
 fi
