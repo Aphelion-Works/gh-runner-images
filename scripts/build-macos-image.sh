@@ -8,10 +8,10 @@
 #   scripts/build-macos-image.sh macos-15
 #   scripts/build-macos-image.sh macos-26
 #
-# macos-15 installs macOS 15.6.1 with Lume's sequoia preset.
-# macos-26 installs macOS 26.6.2 with Lume's tahoe preset.
-# Both guests then install the same Xcode. Xcode 27.1 requires macOS 26.6,
-# so the pin is 26.3, the newest release that runs on macOS 15.6.1 as well.
+# macos-15 installs macOS 15.6.1 with Lume's sequoia preset and Xcode 26.3,
+# the newest Xcode that runs on macOS 15.6.1.
+# macos-26 installs macOS 26.6.2 with Lume's tahoe preset and Xcode 27.2,
+# which requires macOS 26.6.
 # GH_RUNNERS_MACOS_IPSW overrides the restore image with a local file or a URL.
 # GH_RUNNERS_XCODE_XIP overrides the Xcode archive with a local file. The
 # SHA-256 check still applies.
@@ -29,12 +29,6 @@ image_name=gh-runner-images
 # together when that check reports a newer actions/runner release.
 runner_version=2.338.2
 runner_sha=25a065af409ffa317ab4d5a3b614dd15fc9c40f2172bc1b35a1b1258e919a388
-# Xcode 26.3 (17C529). SHA-256 of Xcode_26.3_Universal.xip, the installer
-# archive GitHub's macOS runner images verify.
-xcode_version=26.3
-xcode_file=Xcode_26.3_Universal.xip
-xcode_url=https://download.developer.apple.com/Developer_Tools/Xcode_26.3/Xcode_26.3_Universal.xip
-xcode_sha=cf87232e0419785170edcfa070b750f28808ec00b489ab540c08b7d197c79ae4
 password=${GH_RUNNERS_MACOS_PASSWORD:-lume}
 
 die() { printf 'build-macos-image: %s\n' "$*" >&2; exit 1; }
@@ -43,10 +37,21 @@ case $tag in
   macos-15)
     preset=sequoia
     default_ipsw=https://updates.cdn-apple.com/2025SummerFCS/fullrestores/093-10809/CFD6DD38-DAF0-40DA-854F-31AAD1294C6F/UniversalMac_15.6.1_24G90_Restore.ipsw
+    # Xcode 26.3 (17C529). Newest release that runs on macOS 15.6.1.
+    # SHA-256 of Xcode_26.3_Universal.xip.
+    xcode_version=26.3
+    xcode_file=Xcode_26.3_Universal.xip
+    xcode_url=https://download.developer.apple.com/Developer_Tools/Xcode_26.3/Xcode_26.3_Universal.xip
+    xcode_sha=cf87232e0419785170edcfa070b750f28808ec00b489ab540c08b7d197c79ae4
     ;;
   macos-26)
     preset=tahoe
     default_ipsw=https://updates.cdn-apple.com/2026SummerFCS/fullrestores/140-75212/A2A24B94-1FC1-45A3-93F7-C51B02AF1F4D/UniversalMac_26.6.2_25G83_Restore.ipsw
+    # Xcode 27.2 (27B52). Requires macOS 26.6. SHA-256 of Xcode_27.2_Universal.xip.
+    xcode_version=27.2
+    xcode_file=Xcode_27.2_Universal.xip
+    xcode_url=https://download.developer.apple.com/Developer_Tools/Xcode_27.2/Xcode_27.2_Universal.xip
+    xcode_sha=c28b05526225394fa4017d7f9919c1c898822713edca68872cb4701599f01978
     ;;
   *) die "tag must be macos-15 or macos-26" ;;
 esac
