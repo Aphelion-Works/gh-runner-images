@@ -10,7 +10,11 @@
 #
 # macos-15 installs macOS 15.6.1 with Lume's sequoia preset.
 # macos-26 installs macOS 26.6.2 with Lume's tahoe preset.
+# Both guests then install the same Xcode. Xcode 27.1 requires macOS 26.6,
+# so the pin is 26.3, the newest release that runs on macOS 15.6.1 as well.
 # GH_RUNNERS_MACOS_IPSW overrides the restore image with a local file or a URL.
+# GH_RUNNERS_XCODE_XIP overrides the Xcode archive with a local file. The
+# SHA-256 check still applies.
 # The Mac that runs this must support that release.
 # Push uses GHCR_USER and GHCR_TOKEN. When GHCR_TOKEN is empty and gh is
 # logged in, the script uses that token and does not print it.
@@ -25,6 +29,12 @@ image_name=gh-runner-images
 # together when that check reports a newer actions/runner release.
 runner_version=2.338.2
 runner_sha=25a065af409ffa317ab4d5a3b614dd15fc9c40f2172bc1b35a1b1258e919a388
+# Xcode 26.3 (17C529). SHA-256 of Xcode_26.3_Universal.xip, the installer
+# archive GitHub's macOS runner images verify.
+xcode_version=26.3
+xcode_file=Xcode_26.3_Universal.xip
+xcode_url=https://download.developer.apple.com/Developer_Tools/Xcode_26.3/Xcode_26.3_Universal.xip
+xcode_sha=cf87232e0419785170edcfa070b750f28808ec00b489ab540c08b7d197c79ae4
 password=${GH_RUNNERS_MACOS_PASSWORD:-lume}
 
 die() { printf 'build-macos-image: %s\n' "$*" >&2; exit 1; }
@@ -95,6 +105,22 @@ curl -fsSL -o "$archive" \
   "https://github.com/actions/runner/releases/download/v${runner_version}/actions-runner-osx-arm64-${runner_version}.tar.gz"
 got=$(shasum -a 256 "$archive")
 [[ ${got%% *} == "$runner_sha" ]] || die "runner archive does not match its published SHA-256"
+printf 'installing Xcode %s\n' "$xcode_version"
+xip=${GH_RUNNERS_XCODE_XIP:-}
+if [[ -z $xip ]]; then
+  cache="${HOME}/.cache/gh-runners"
+  mkdir -p "$cache"
+  xip="${cache}/${xcode_file}"
+  if [[ ! -f $xip ]]; then
+    printf 'downloading %s\n' "$xcode_file"
+    curl -fL --retry 5 -o "$xip" "$xcode_url" \
+      || die "could not download ${xcode_file}. Save the archive from a signed-in Apple developer session and set GH_RUNNERS_XCODE_XIP."
+  fi
+fi
+[[ -f $xip ]] || die "Xcode archive ${xip} does not exist"
+got=$(shasum -a 256 "$xip")
+[[ ${got%% *} == "$xcode_sha" ]] || die "Xcode archive does not match its published SHA-256"
+cp "$xip" "${share}/${xcode_file}"
 install -m 0755 "${root}/macos/start-runner.sh" "${share}/start-runner.sh"
 install -m 0644 "${root}/macos/io.gh-runners.guest.plist" "${share}/io.gh-runners.guest.plist"
 
@@ -179,6 +205,8 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
 done
 compgen -G "${share}/actions-runner-osx-arm64-"*.tar.gz >/dev/null \
   || { printf 'runner archive is not mounted\n' >&2; exit 1; }
+compgen -G "${share}/Xcode_"*.xip >/dev/null \
+  || { printf 'Xcode archive is not mounted\n' >&2; exit 1; }
 as_root() {
   if sudo -n true >/dev/null 2>&1; then
     sudo -n "$@"
@@ -197,6 +225,14 @@ printf 'lume ALL=(ALL) NOPASSWD: ALL\n' > /tmp/lume-sudoers
 as_root install -m 0440 /tmp/lume-sudoers /etc/sudoers.d/lume
 as_root visudo -cf /etc/sudoers.d/lume
 rm -f /tmp/lume-sudoers
+cd /Users/lume
+xip --expand "${share}/Xcode_"*.xip
+[[ -d /Users/lume/Xcode.app ]] || { printf 'xip did not produce Xcode.app\n' >&2; exit 1; }
+as_root mv /Users/lume/Xcode.app /Applications/Xcode.app
+as_root xcode-select -s /Applications/Xcode.app
+as_root xcodebuild -license accept
+as_root xcodebuild -runFirstLaunch
+xcodebuild -version
 printf 'guest setup complete\n'
 as_root shutdown -h +1
 REMOTE
