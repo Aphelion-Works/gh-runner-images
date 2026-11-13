@@ -41,6 +41,8 @@ jobs:
         run: .github/scripts/install-ci-tools.sh
       - name: shellcheck
         run: shellcheck -S style scripts/*.sh tests/*.sh tests/fake-runner/*.sh rootfs/usr/local/bin/entrypoint.sh .github/scripts/*.sh
+      - name: macOS runner pin check
+        run: tests/check-macos-runner.sh
       - name: hadolint
         run: hadolint Dockerfile
       - name: actionlint

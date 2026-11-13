@@ -8,9 +8,10 @@
 #   scripts/build-macos-image.sh macos-15
 #   scripts/build-macos-image.sh macos-26
 #
-# macos-15 uses Lume's sequoia unattended preset. macos-26 uses tahoe.
-# GH_RUNNERS_MACOS_IPSW overrides the restore image (default: latest).
-# The preset and the restore image must be the same macOS release.
+# macos-15 installs macOS 15.6.1 with Lume's sequoia preset.
+# macos-26 installs macOS 26.6.2 with Lume's tahoe preset.
+# GH_RUNNERS_MACOS_IPSW overrides the restore image with a local file or a URL.
+# The Mac that runs this must support that release.
 # Push uses GHCR_USER and GHCR_TOKEN. When GHCR_TOKEN is empty and gh is
 # logged in, the script uses that token and does not print it.
 set -euo pipefail
@@ -20,18 +21,26 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 registry=ghcr.io
 org=aphelion-works
 image_name=gh-runner-images
+# Checked weekly by scripts/check-macos-runner.sh. Bump this and runner_sha
+# together when that check reports a newer actions/runner release.
 runner_version=2.338.2
 runner_sha=25a065af409ffa317ab4d5a3b614dd15fc9c40f2172bc1b35a1b1258e919a388
-ipsw=${GH_RUNNERS_MACOS_IPSW:-latest}
 password=${GH_RUNNERS_MACOS_PASSWORD:-lume}
 
 die() { printf 'build-macos-image: %s\n' "$*" >&2; exit 1; }
 
 case $tag in
-  macos-15) preset=sequoia ;;
-  macos-26) preset=tahoe ;;
+  macos-15)
+    preset=sequoia
+    default_ipsw=https://updates.cdn-apple.com/2025SummerFCS/fullrestores/093-10809/CFD6DD38-DAF0-40DA-854F-31AAD1294C6F/UniversalMac_15.6.1_24G90_Restore.ipsw
+    ;;
+  macos-26)
+    preset=tahoe
+    default_ipsw=https://updates.cdn-apple.com/2026SummerFCS/fullrestores/140-75212/A2A24B94-1FC1-45A3-93F7-C51B02AF1F4D/UniversalMac_26.6.2_25G83_Restore.ipsw
+    ;;
   *) die "tag must be macos-15 or macos-26" ;;
 esac
+ipsw=${GH_RUNNERS_MACOS_IPSW:-$default_ipsw}
 
 [[ $(uname -s) == Darwin ]] || die "macOS images are built on a Mac"
 command -v lume >/dev/null || die "lume is not installed (https://cua.ai/docs/lume)"
@@ -58,10 +67,27 @@ if have_vm; then
   die "VM ${tag} already exists. Run: lume delete ${tag} --force"
 fi
 
+if [[ $ipsw == http://* || $ipsw == https://* ]]; then
+  cache="${HOME}/.cache/gh-runners"
+  mkdir -p "$cache"
+  dest="${cache}/${ipsw##*/}"
+  printf 'downloading %s\n' "${ipsw##*/}"
+  curl -fL --retry 5 -C - -o "$dest" "$ipsw"
+  ipsw=$dest
+fi
+
 work=$(mktemp -d)
 share="${work}/share"
 mkdir -p "$share"
-cleanup() { rm -rf "$work"; }
+# The shared directory has to stay until the VM has stopped. Removing it
+# while lume run still has it mounted takes the guest off the network.
+cleanup() {
+  if [[ -n ${lume_pid:-} ]] && kill -0 "$lume_pid" 2>/dev/null; then
+    lume stop "$tag" --force >/dev/null 2>&1 || true
+    wait "$lume_pid" 2>/dev/null || true
+  fi
+  rm -rf "$work"
+}
 trap cleanup EXIT
 
 archive="${share}/actions-runner-osx-arm64-${runner_version}.tar.gz"
@@ -73,7 +99,12 @@ install -m 0755 "${root}/macos/start-runner.sh" "${share}/start-runner.sh"
 install -m 0644 "${root}/macos/io.gh-runners.guest.plist" "${share}/io.gh-runners.guest.plist"
 
 printf 'creating %s from %s (%s)\n' "$tag" "$ipsw" "$preset"
-lume create "$tag" --ipsw "$ipsw" --unattended "$preset" --cpu 4 --memory 8GB
+# Create and set up in two steps. `lume create --unattended` deletes the VM
+# when its own SSH client cannot log in. That client can time out even after
+# the guest is listening, so a failed check must leave the disk in place.
+# The system ssh below is what decides whether setup worked.
+lume create "$tag" --ipsw "$ipsw" --cpu 4 --memory 8GB
+lume setup "$tag" --unattended "$preset" || true
 
 askpass="${work}/askpass"
 cat >"$askpass" <<'EOF'
@@ -111,11 +142,32 @@ done
 [[ -n $ip ]] || die "VM ${tag} did not get an address"
 
 known="${work}/known_hosts"
+printf 'waiting for ssh on %s\n' "$ip"
+ready=0
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do
+  if DISPLAY=dummy SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force \
+    GH_RUNNERS_MACOS_PASSWORD="$password" \
+    ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$known" \
+    -o PreferredAuthentications=password -o PubkeyAuthentication=no \
+    -o ConnectTimeout=8 \
+    "lume@${ip}" true; then
+    ready=1
+    break
+  fi
+  sleep 10
+done
+[[ $ready -eq 1 ]] || die "VM ${tag} did not accept ssh"
+quoted=$(printf '%q' "$password")
+guest_log="${work}/guest.log"
+# The lume user can write its home directory. /usr/local and LaunchDaemons
+# belong to root, and shutdown does too. A closed connection after the guest
+# has halted is exit 255, which is success once the marker is present.
+set +e
 DISPLAY=dummy SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force \
   GH_RUNNERS_MACOS_PASSWORD="$password" \
   ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$known" \
   -o PreferredAuthentications=password -o PubkeyAuthentication=no \
-  "lume@${ip}" 'bash -s' <<'REMOTE'
+  "lume@${ip}" "GH_RUNNERS_MACOS_PASSWORD=${quoted} bash -s" <<'REMOTE' | tee "$guest_log"
 set -euo pipefail
 share="/Volumes/My Shared Files"
 if [[ -d ${share}/share ]]; then
@@ -127,16 +179,43 @@ for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
 done
 compgen -G "${share}/actions-runner-osx-arm64-"*.tar.gz >/dev/null \
   || { printf 'runner archive is not mounted\n' >&2; exit 1; }
+as_root() {
+  if sudo -n true >/dev/null 2>&1; then
+    sudo -n "$@"
+  else
+    printf '%s\n' "$GH_RUNNERS_MACOS_PASSWORD" | sudo -S -p '' "$@"
+  fi
+}
 install -d -o lume -g staff /Users/lume/actions-runner
 tar -xzf "${share}/actions-runner-osx-arm64-"*.tar.gz -C /Users/lume/actions-runner
 chown -R lume:staff /Users/lume/actions-runner
-install -d /usr/local/lib/gh-runners
-install -m 0755 "${share}/start-runner.sh" /usr/local/lib/gh-runners/start-runner.sh
-install -m 0644 "${share}/io.gh-runners.guest.plist" /Library/LaunchDaemons/io.gh-runners.guest.plist
-shutdown -h now
+as_root install -d /usr/local/lib/gh-runners
+as_root install -m 0755 "${share}/start-runner.sh" /usr/local/lib/gh-runners/start-runner.sh
+as_root install -m 0644 "${share}/io.gh-runners.guest.plist" /Library/LaunchDaemons/io.gh-runners.guest.plist
+# as_root feeds sudo its own stdin, so the sudoers line has to be a file.
+printf 'lume ALL=(ALL) NOPASSWD: ALL\n' > /tmp/lume-sudoers
+as_root install -m 0440 /tmp/lume-sudoers /etc/sudoers.d/lume
+as_root visudo -cf /etc/sudoers.d/lume
+rm -f /tmp/lume-sudoers
+printf 'guest setup complete\n'
+as_root shutdown -h +1
 REMOTE
-
-wait "$lume_pid" || true
+status=${PIPESTATUS[0]}
+set -e
+if [[ $status -ne 0 && $status -ne 255 ]]; then
+  die "guest setup failed"
+fi
+grep -q 'guest setup complete' "$guest_log" || die "guest setup failed"
+for ((i = 0; i < 120; i++)); do
+  if ! kill -0 "$lume_pid" 2>/dev/null; then
+    break
+  fi
+  sleep 2
+done
+if kill -0 "$lume_pid" 2>/dev/null; then
+  die "VM ${tag} did not shut down"
+fi
+wait "$lume_pid" 2>/dev/null || true
 
 user=${GHCR_USER:-}
 token=${GHCR_TOKEN:-}
@@ -147,7 +226,9 @@ if [[ -z $token ]] && command -v gh >/dev/null; then
   fi
 fi
 [[ -n $user && -n $token ]] || die "set GHCR_USER and GHCR_TOKEN, or log in with gh"
-lume push "$tag" "${image_name}:${tag}" \
-  --registry "$registry" --organization "$org" \
-  --username "$user" --password "$token"
+# lume 0.7 reads the registry login from the environment. It has no
+# --username or --password flags.
+GHCR_USERNAME="$user" GHCR_TOKEN="$token" \
+  lume push "$tag" "${image_name}:${tag}" \
+  --registry "$registry" --organization "$org"
 printf 'pushed %s/%s/%s:%s\n' "$registry" "$org" "$image_name" "$tag"

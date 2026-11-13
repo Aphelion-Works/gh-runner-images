@@ -1,0 +1,71 @@
+# Warns when the macOS images are still pinned to an older actions/runner
+# release. The Linux images take the newest release on their own. A Mac has
+# to rebuild the VMs, so this opens one issue and fails the run until the pin
+# matches again.
+name: macOS runner
+
+on:
+  schedule:
+    - cron: "41 4 * * 1" # Monday 04:41 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Compare the pinned runner with the latest release
+        id: compare
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          scripts/check-macos-runner.sh >"$RUNNER_TEMP/runner-check.txt" 2>&1
+          status=$?
+          set -e
+          cat "$RUNNER_TEMP/runner-check.txt"
+          {
+            echo "status=$status"
+            echo "message<<EOF"
+            cat "$RUNNER_TEMP/runner-check.txt"
+            echo "EOF"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Open or close the warning
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUS: ${{ steps.compare.outputs.status }}
+          MESSAGE: ${{ steps.compare.outputs.message }}
+        run: |
+          set -euo pipefail
+          title="macOS image runner is behind the latest actions/runner"
+          numbers=$(gh issue list --state open --limit 50 --json number,title \
+            --jq '.[] | select(.title=="macOS image runner is behind the latest actions/runner") | .number')
+          if [[ $STATUS -eq 1 ]]; then
+            if [[ -z $numbers ]]; then
+              gh issue create --title "$title" --body "$MESSAGE"
+            else
+              for number in $numbers; do
+                current=$(gh issue view "$number" --json body --jq .body)
+                [[ $current == "$MESSAGE" ]] || gh issue edit "$number" --body "$MESSAGE"
+              done
+            fi
+            exit 1
+          fi
+          if [[ $STATUS -eq 0 ]]; then
+            for number in $numbers; do
+              gh issue close "$number" --comment "The pinned runner now matches the latest actions/runner release."
+            done
+            exit 0
+          fi
+          printf 'check-macos-runner failed before it could compare versions\n' >&2
+          exit "$STATUS"

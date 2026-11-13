@@ -28,36 +28,50 @@ headers (OpenSSL, curl, libpq, libyaml, libffi, zlib), Python 3 with pip, venv
 and pipx, Node.js (Ubuntu's), shellcheck, git-lfs, GitHub CLI, yq, zstd, bzip2,
 rsync, wget, ssh, ping, dig, netcat.
 
-Each tag also exists pinned:
+Each Linux tag also exists pinned:
 
 - `ubuntu-24.04-2.338.2`: moves only within that runner version
-- `ubuntu-24.04-2.338.2-20261106`: never moves
+- `ubuntu-24.04-2.338.2-20261113`: never moves
 
-There is no `latest`: pick an Ubuntu release explicitly.
+`ubuntu-24.04-tools` and `ubuntu-26.04` use the same two suffixes. There is
+no `latest`: pick an Ubuntu release explicitly. The macOS tag has no suffix.
 
 ### macOS
 
-`ghcr.io/aphelion-works/gh-runner-images:macos-15` and `:macos-26` are macOS
-VMs, not containers. A Mac host pulls one with Lume and clones it for each
-job. They are built by `scripts/build-macos-image.sh` on an Apple Silicon Mac
-and pushed to this same registry. GitHub-hosted runners cannot build them:
-a macOS guest only boots on Apple hardware. The disk is not stored in git.
+macOS images are arm64 VMs, not containers. A Mac host pulls one with Lume
+and clones it for each job. `scripts/build-macos-image.sh` builds them on an
+Apple Silicon Mac and pushes them to this same registry. GitHub-hosted
+runners cannot build them, and the daily workflow does not. The disk is not
+stored in git.
 
 | Tag | Guest |
 |---|---|
-| `macos-15` | macOS 15, the Actions runner, one job then shutdown |
-| `macos-26` | macOS 26, the same |
+| `macos-26` | macOS 26.6.2, Xcode 27.1, the Actions runner, one job then shutdown. Published. |
+| `macos-15` | macOS 15.6.1, the Actions runner, one job then shutdown. No Xcode. Not published yet. |
 
-Neither tag includes Xcode.
+The published `macos-26` image has Xcode 27.1 at `/Applications/Xcode.app`.
+A signing certificate is not in the image. A job imports one, as on
+GitHub-hosted runners.
+
+The guest user is `lume`, with passwordless sudo. The host passes the JIT
+config in through Lume's shared folder, and the VM shuts down after the job.
+Building `macos-15` needs a Mac that can boot macOS 15. `macos-26` needs a
+Mac on macOS 26 or newer.
 
 ### Updates
 
-[`images.yml`](.github/workflows/images.yml) runs daily at 01:17 UTC. It:
+[`images.yml`](.github/workflows/images.yml) runs daily at 01:17 UTC and
+publishes the three Linux images. It:
 
-1. builds every image with the newest runner release,
+1. builds each one with the newest runner release,
 2. tests it ([`tests/test-image.sh`](tests/test-image.sh)),
 3. scans it, and
 4. publishes it only if the tests pass.
+
+macOS images are published separately, from a Mac.
+[`macos-runner.yml`](.github/workflows/macos-runner.yml) runs weekly and opens
+an issue when `runner_version` in `scripts/build-macos-image.sh` is behind the
+latest actions/runner release. That is the signal to rebuild the macOS images.
 
 New runner releases are picked up the same day. Ubuntu and Docker packages are
 refreshed weekly. On other days only the small runner layer can change, so hosts
@@ -95,7 +109,7 @@ nothing else changes.
 | Jobs run as | root | `runner` (uid 1001) with passwordless sudo |
 | Credentials accepted | registration token, PAT, GitHub App key | registration token, or `RUNNER_JITCONFIG` |
 | Extra tools | many (AWS CLI, PowerShell, Podman…) | `-tools` variant (list above) |
-| Provenance | none | signed build provenance and SBOM attestations |
+| Provenance | none | Linux images: signed build provenance and an SBOM |
 
 Workflows that run root-only commands without `sudo`, such as `apt-get install`,
 need `sudo` added. AWS CLI, PowerShell and Podman aren't included: install them
@@ -149,7 +163,8 @@ docker run --rm --privileged -e START_DOCKER_SERVICE=true IMAGE docker info
 
 ## Verifying an image
 
-Every published image carries signed build-provenance and SBOM attestations:
+Every published Linux image carries signed build-provenance and SBOM
+attestations. The macOS VMs do not. Check a Linux image with:
 
 ```bash
 gh attestation verify oci://ghcr.io/aphelion-works/gh-runner-images:ubuntu-24.04-tools \
@@ -166,7 +181,7 @@ gh attestation verify oci://ghcr.io/aphelion-works/gh-runner-images:ubuntu-24.04
   - CI tools are pinned with checksums, and every GitHub Action is pinned to a
     commit SHA.
 - **Scanning:** findings appear under *Security → Code scanning*.
-  - Trivy scans each image.
+  - Trivy scans each Linux image.
   - CodeQL analyses the workflows.
   - OpenSSF Scorecard checks the repository's practices.
   - Dependency review checks pull requests.
@@ -190,6 +205,7 @@ Lint, as CI does:
 
 ```bash
 shellcheck -S style scripts/*.sh tests/*.sh tests/fake-runner/*.sh rootfs/usr/local/bin/entrypoint.sh .github/scripts/*.sh
+tests/check-macos-runner.sh
 ```
 
 ```bash
@@ -207,6 +223,14 @@ scripts/install-base.sh         OS packages, Docker Engine, runner user
 scripts/install-runner.sh       downloads and checks the runner release
 scripts/install-tools.sh        the -tools variant
 scripts/resolve-versions.sh     newest runner/yq versions and their SHA-256s
-scripts/build.sh                local build of one image
-tests/test-image.sh             image tests (CI runs them before publishing)
+scripts/build.sh                local build of one Linux image
+scripts/build-macos-image.sh    macOS VM build (a Mac with Lume; not run in CI)
+scripts/check-macos-runner.sh   compare that build's runner pin with the latest release
+macos/start-runner.sh           guest boot: read the JIT config, one job, shutdown
+macos/io.gh-runners.guest.plist guest LaunchDaemon for that script
+tests/test-image.sh             Linux image tests (CI runs them before publishing)
 ```
+
+A macOS build is `scripts/build-macos-image.sh macos-26`. The script installs
+the OS, the Actions runner, and passwordless sudo. Xcode in the published
+`macos-26` image was installed into that VM before it was pushed.
