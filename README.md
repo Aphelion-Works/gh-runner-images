@@ -46,8 +46,8 @@ stored in git.
 
 | Tag | Guest |
 |---|---|
-| `macos-26` | macOS 26.6.2, Xcode 26.3 at `/Applications/Xcode.app`, the Actions runner, one job then shutdown. The image published before this pin still has the hand-installed Xcode 27.1 until it is rebuilt. |
-| `macos-15` | macOS 15.6.1, Xcode 26.3 at `/Applications/Xcode.app`, the Actions runner, one job then shutdown. Published without Xcode until it is rebuilt. |
+| `macos-26` | macOS 26.6.2, Xcode 27.2 at `/Applications/Xcode.app`, the Actions runner, one job then shutdown. The published image still has the hand-installed Xcode 27.1 until it is rebuilt. |
+| `macos-15` | macOS 15.6.1, Xcode 26.3 at `/Applications/Xcode.app`, the Actions runner, one job then shutdown. Published without Xcode until it is rebuilt. Xcode 27 requires macOS 26.6. |
 
 A signing certificate is not in the image. A job imports one, as on
 GitHub-hosted runners.
@@ -189,6 +189,6 @@ docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
 ```
 
 A macOS build is `scripts/build-macos-image.sh macos-26` or `macos-15`. The
-script installs the OS, the Actions runner, passwordless sudo, and Xcode 26.3.
-Xcode 27.1 requires macOS 26.6, so it cannot be installed in the macOS 15
-guest. 26.3 runs on both.
+script installs the OS, the Actions runner, passwordless sudo, and Xcode.
+`macos-15` gets Xcode 26.3, the newest release that runs on macOS 15.6.1.
+`macos-26` gets Xcode 27.2, which requires macOS 26.6.
