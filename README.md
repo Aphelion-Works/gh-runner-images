@@ -46,8 +46,8 @@ stored in git.
 
 | Tag | Guest |
 |---|---|
-| `macos-26` | macOS 26.6.2, Xcode 27.1 at `/Applications/Xcode.app`, the Actions runner, one job then shutdown. Published. |
-| `macos-15` | macOS 15.6.1, the Actions runner, one job then shutdown. No Xcode. Published. |
+| `macos-26` | macOS 26.6.2, Xcode 26.3 at `/Applications/Xcode.app`, the Actions runner, one job then shutdown. The image published before this pin still has the hand-installed Xcode 27.1 until it is rebuilt. |
+| `macos-15` | macOS 15.6.1, Xcode 26.3 at `/Applications/Xcode.app`, the Actions runner, one job then shutdown. Published without Xcode until it is rebuilt. |
 
 A signing certificate is not in the image. A job imports one, as on
 GitHub-hosted runners.
@@ -177,6 +177,7 @@ Lint, as CI does:
 ```bash
 shellcheck -S style scripts/*.sh tests/*.sh tests/fake-runner/*.sh rootfs/usr/local/bin/entrypoint.sh .github/scripts/*.sh
 tests/check-macos-runner.sh
+tests/check-macos-xcode.sh
 ```
 
 ```bash
@@ -187,6 +188,7 @@ docker run --rm -i -v "$PWD/.hadolint.yaml:/.config/hadolint.yaml:ro" hadolint/h
 docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
 ```
 
-A macOS build is `scripts/build-macos-image.sh macos-26`. The script installs
-the OS, the Actions runner, and passwordless sudo. Xcode in the published
-`macos-26` image was installed into that VM before it was pushed.
+A macOS build is `scripts/build-macos-image.sh macos-26` or `macos-15`. The
+script installs the OS, the Actions runner, passwordless sudo, and Xcode 26.3.
+Xcode 27.1 requires macOS 26.6, so it cannot be installed in the macOS 15
+guest. 26.3 runs on both.
