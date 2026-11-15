@@ -47,10 +47,11 @@ case $tag in
   macos-26)
     preset=tahoe
     default_ipsw=https://updates.cdn-apple.com/2026SummerFCS/fullrestores/140-75212/A2A24B94-1FC1-45A3-93F7-C51B02AF1F4D/UniversalMac_26.6.2_25G83_Restore.ipsw
-    # Xcode 27.2 (27B52). Requires macOS 26.6. SHA-256 of Xcode_27.2_Universal.xip.
+    # Xcode 27.2 (27B52). Requires macOS 26.6. SHA-256 of Xcode_27.2.xip.
+    # Apple publishes one archive for this release, and it is not named Universal.
     xcode_version=27.2
-    xcode_file=Xcode_27.2_Universal.xip
-    xcode_url=https://download.developer.apple.com/Developer_Tools/Xcode_27.2/Xcode_27.2_Universal.xip
+    xcode_file=Xcode_27.2.xip
+    xcode_url=https://download.developer.apple.com/Developer_Tools/Xcode_27.2/Xcode_27.2.xip
     xcode_sha=c28b05526225394fa4017d7f9919c1c898822713edca68872cb4701599f01978
     ;;
   *) die "tag must be macos-15 or macos-26" ;;
