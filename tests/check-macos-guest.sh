@@ -152,7 +152,11 @@ if grep -q 'macos/enable-automation.sh' "$build" && grep -F -q '/enable-automati
 else
   fail "image allows UI automation without a password"
 fi
-if grep -q 'spctl --global-disable' "$build"; then pass "image turns off Gatekeeper assessment"; else fail "image turns off Gatekeeper assessment"; fi
+if grep -E -q '^[[:space:]]*[^#[:space:]].*spctl --global-disable' "$build"; then
+  fail "image does not stop for Gatekeeper's System Settings confirmation"
+else
+  pass "image does not stop for Gatekeeper's System Settings confirmation"
+fi
 if grep -q 'LSQuarantine -bool false' "$build"; then pass "image turns off the quarantine warning"; else fail "image turns off the quarantine warning"; fi
 if grep -q 'AutomaticCheckEnabled -bool false' "$build"; then pass "image turns off software update checks"; else fail "image turns off software update checks"; fi
 if grep -q 'com.apple.CrashReporter DialogType none' "$build"; then pass "image keeps crash reports out of a dialog"; else fail "image keeps crash reports out of a dialog"; fi

@@ -245,9 +245,12 @@ as_root /usr/sbin/DevToolsSecurity -enable
 # so a job does not sit on the prompt until Xcode gives up.
 "${share}/enable-automation.sh"
 # A job has nobody to click a dialog. These are the ones a fresh guest
-# raises: Gatekeeper, the quarantine warning, Software Update, and Crash
-# Reporter. Crash reports still land in DiagnosticReports.
-as_root spctl --global-disable
+# raises: the quarantine warning, Software Update, and Crash Reporter.
+# Crash reports still land in DiagnosticReports.
+# spctl --global-disable is not one of them. Since macOS 15 it only reveals
+# an "Anywhere" control and tells the operator to confirm it in System
+# Settings, then exits non-zero. That confirmation cannot be finished over
+# ssh, and a failing call here stops the build before Xcode is installed.
 defaults write com.apple.LaunchServices LSQuarantine -bool false
 as_root defaults write /Library/Preferences/com.apple.LaunchServices LSQuarantine -bool false
 as_root defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticCheckEnabled -bool false

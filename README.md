@@ -56,9 +56,11 @@ The guest user is `lume`, with passwordless sudo. The host passes the JIT
 config in through Lume's shared folder, and the VM shuts down after the job.
 The guest logs `lume` in at boot and starts the runner in that graphical
 session, after `testmanagerd` is running, so UI tests can drive the screen.
-XCTest can turn on UI automation without a password. Gatekeeper
-assessment, the download quarantine warning, software-update checks, and
-crash dialogs are off. The screen does not lock. The step it is on is
+XCTest can turn on UI automation without a password. The download
+quarantine warning, software-update checks, and crash dialogs are off.
+Gatekeeper's "Anywhere" switch is a System Settings confirmation on
+macOS 15 and later, so the image does not call it. The screen does not
+lock. The step it is on is
 `guest-status`, next to the JIT config. The published images do this after
 they are rebuilt.
 Building `macos-15` needs a Mac that can boot macOS 15. `macos-26` needs a
