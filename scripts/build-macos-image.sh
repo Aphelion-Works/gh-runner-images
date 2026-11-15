@@ -123,6 +123,7 @@ fi
 [[ -f $xip ]] || die "Xcode archive ${xip} does not exist"
 cp "$xip" "${share}/${xcode_file}"
 install -m 0755 "${root}/macos/start-runner.sh" "${share}/start-runner.sh"
+install -m 0755 "${root}/macos/enable-automation.sh" "${share}/enable-automation.sh"
 install -m 0644 "${root}/macos/io.gh-runners.guest.plist" "${share}/io.gh-runners.guest.plist"
 
 printf 'creating %s from %s (%s)\n' "$tag" "$ipsw" "$preset"
@@ -239,6 +240,22 @@ defaults write com.apple.screensaver askForPassword -int 0
 defaults write com.apple.screensaver idleTime -int 0
 as_root pmset -a sleep 0 displaysleep 0 disksleep 0
 as_root /usr/sbin/DevToolsSecurity -enable
+# DevToolsSecurity is the older developer-mode switch. XCTest then asks for
+# the admin password before it will drive the UI. Answer that once, here,
+# so a job does not sit on the prompt until Xcode gives up.
+"${share}/enable-automation.sh"
+# A job has nobody to click a dialog. These are the ones a fresh guest
+# raises: Gatekeeper, the quarantine warning, Software Update, and Crash
+# Reporter. Crash reports still land in DiagnosticReports.
+as_root spctl --global-disable
+defaults write com.apple.LaunchServices LSQuarantine -bool false
+as_root defaults write /Library/Preferences/com.apple.LaunchServices LSQuarantine -bool false
+as_root defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticCheckEnabled -bool false
+as_root defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticDownload -bool false
+as_root defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticallyInstallMacOSUpdates -bool false
+as_root defaults write /Library/Preferences/com.apple.SoftwareUpdate CriticalUpdateInstall -bool false
+defaults write com.apple.CrashReporter DialogType none
+as_root defaults write /Library/Preferences/com.apple.CrashReporter DialogType none
 cd /Users/lume
 xip --expand "${share}/Xcode_"*.xip
 [[ -d /Users/lume/Xcode.app ]] || { printf 'xip did not produce Xcode.app\n' >&2; exit 1; }

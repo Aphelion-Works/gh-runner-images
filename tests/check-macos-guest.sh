@@ -147,6 +147,61 @@ if grep -q 'sysadminctl -autologin set -userName lume' "$build"; then pass "imag
 if grep -q 'sysadminctl -screenLock off' "$build"; then pass "image turns off the screen lock"; else fail "image turns off the screen lock"; fi
 if grep -q 'pmset -a sleep 0 displaysleep 0 disksleep 0' "$build"; then pass "image keeps the session awake"; else fail "image keeps the session awake"; fi
 if grep -q '/usr/sbin/DevToolsSecurity -enable' "$build"; then pass "image enables developer tools"; else fail "image enables developer tools"; fi
+if grep -q 'macos/enable-automation.sh' "$build" && grep -F -q '/enable-automation.sh"' "$build"; then
+  pass "image allows UI automation without a password"
+else
+  fail "image allows UI automation without a password"
+fi
+if grep -q 'spctl --global-disable' "$build"; then pass "image turns off Gatekeeper assessment"; else fail "image turns off Gatekeeper assessment"; fi
+if grep -q 'LSQuarantine -bool false' "$build"; then pass "image turns off the quarantine warning"; else fail "image turns off the quarantine warning"; fi
+if grep -q 'AutomaticCheckEnabled -bool false' "$build"; then pass "image turns off software update checks"; else fail "image turns off software update checks"; fi
+if grep -q 'com.apple.CrashReporter DialogType none' "$build"; then pass "image keeps crash reports out of a dialog"; else fail "image keeps crash reports out of a dialog"; fi
 
-[[ $fails -eq 0 ]]
+automation=$tmp/automation
+mark=$tmp/automation-ready
+cat >"$automation" <<'EOF'
+#!/bin/sh
+if [ "$1" = enable-automationmode-without-authentication ]; then
+  printf "Enter the password for user 'lume': "
+  IFS= read -r got || exit 1
+  if [ "$got" = "$EXPECT_PASSWORD" ]; then
+    printf 'succeeded.\n'
+    : > "$EXPECT_MARK"
+    exit 0
+  fi
+  printf 'Authentication failed\n'
+  exit 1
+fi
+if [ -f "$EXPECT_MARK" ]; then
+  printf 'Automation Mode is disabled.\nThis device DOES NOT REQUIRE user authentication to enable Automation Mode.\n'
+  exit 0
+fi
+printf 'This device requires user authentication to enable Automation Mode.\n'
+exit 1
+EOF
+chmod 0755 "$automation"
+if EXPECT_PASSWORD='pa$$ word' EXPECT_MARK="$mark" \
+  GH_RUNNERS_MACOS_PASSWORD='pa$$ word' \
+  GH_RUNNERS_AUTOMATION_TOOL="$automation" \
+  "$root/macos/enable-automation.sh" >/dev/null; then
+  pass "automation setup answers the password prompt"
+else
+  fail "automation setup answers the password prompt"
+fi
+rm -f "$mark"
+rejected=$tmp/automation-rejected
+if EXPECT_PASSWORD='pa$$ word' EXPECT_MARK="$mark" \
+  GH_RUNNERS_MACOS_PASSWORD='wrong' \
+  GH_RUNNERS_AUTOMATION_TOOL="$automation" \
+  "$root/macos/enable-automation.sh" >"$rejected" 2>&1; then
+  fail "automation setup rejects a wrong password"
+elif grep -q 'Authentication failed' "$rejected"; then
+  pass "automation setup rejects a wrong password"
+else
+  fail "automation setup rejects a wrong password" "$(cat "$rejected")"
+fi
+
+if [[ $fails -ne 0 ]]; then
+  exit 1
+fi
 printf 'ok\n'

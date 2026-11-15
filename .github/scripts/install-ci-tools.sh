@@ -36,8 +36,8 @@ fetch "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}
   "$TRIVY_SHA256" "$tmp/trivy.tar.gz"
 tar -xzf "$tmp/trivy.tar.gz" -C "$BIN" trivy
 
-if ! command -v shellcheck >/dev/null; then
-  sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends shellcheck >/dev/null
+if ! command -v shellcheck >/dev/null || ! command -v expect >/dev/null; then
+  sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends shellcheck expect >/dev/null
 fi
 
 if [[ -n "${GITHUB_PATH:-}" ]]; then echo "$BIN" >>"$GITHUB_PATH"; fi
