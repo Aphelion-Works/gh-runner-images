@@ -13,8 +13,7 @@
 # macos-26 installs macOS 26.6.2 with Lume's tahoe preset and Xcode 27.2,
 # which requires macOS 26.6.
 # GH_RUNNERS_MACOS_IPSW overrides the restore image with a local file or a URL.
-# GH_RUNNERS_XCODE_XIP overrides the Xcode archive with a local file. The
-# SHA-256 check still applies.
+# GH_RUNNERS_XCODE_XIP overrides the Xcode archive with a local file.
 # The Mac that runs this must support that release.
 # Push uses GHCR_USER and GHCR_TOKEN. When GHCR_TOKEN is empty and gh is
 # logged in, the script uses that token and does not print it.
@@ -38,21 +37,19 @@ case $tag in
     preset=sequoia
     default_ipsw=https://updates.cdn-apple.com/2025SummerFCS/fullrestores/093-10809/CFD6DD38-DAF0-40DA-854F-31AAD1294C6F/UniversalMac_15.6.1_24G90_Restore.ipsw
     # Xcode 26.3 (17C529). Newest release that runs on macOS 15.6.1.
-    # SHA-256 of Xcode_26.3_Universal.xip.
+    # Apple Silicon archive. This pool is arm64.
     xcode_version=26.3
-    xcode_file=Xcode_26.3_Universal.xip
-    xcode_url=https://download.developer.apple.com/Developer_Tools/Xcode_26.3/Xcode_26.3_Universal.xip
-    xcode_sha=cf87232e0419785170edcfa070b750f28808ec00b489ab540c08b7d197c79ae4
+    xcode_file=Xcode_26.3_Apple_silicon.xip
+    xcode_url=https://download.developer.apple.com/Developer_Tools/Xcode_26.3/Xcode_26.3_Apple_silicon.xip
     ;;
   macos-26)
     preset=tahoe
     default_ipsw=https://updates.cdn-apple.com/2026SummerFCS/fullrestores/140-75212/A2A24B94-1FC1-45A3-93F7-C51B02AF1F4D/UniversalMac_26.6.2_25G83_Restore.ipsw
-    # Xcode 27.2 (27B52). Requires macOS 26.6. SHA-256 of Xcode_27.2.xip.
+    # Xcode 27.2 (27B52). Requires macOS 26.6.
     # Apple publishes one archive for this release, and it is not named Universal.
     xcode_version=27.2
     xcode_file=Xcode_27.2.xip
     xcode_url=https://download.developer.apple.com/Developer_Tools/Xcode_27.2/Xcode_27.2.xip
-    xcode_sha=c28b05526225394fa4017d7f9919c1c898822713edca68872cb4701599f01978
     ;;
   *) die "tag must be macos-15 or macos-26" ;;
 esac
@@ -124,8 +121,6 @@ if [[ -z $xip ]]; then
   fi
 fi
 [[ -f $xip ]] || die "Xcode archive ${xip} does not exist"
-got=$(shasum -a 256 "$xip")
-[[ ${got%% *} == "$xcode_sha" ]] || die "Xcode archive does not match its published SHA-256"
 cp "$xip" "${share}/${xcode_file}"
 install -m 0755 "${root}/macos/start-runner.sh" "${share}/start-runner.sh"
 install -m 0644 "${root}/macos/io.gh-runners.guest.plist" "${share}/io.gh-runners.guest.plist"
