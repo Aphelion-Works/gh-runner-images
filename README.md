@@ -47,13 +47,17 @@ stored in git.
 | Tag | Guest |
 |---|---|
 | `macos-26` | macOS 26.6.2, Xcode 27.2 at `/Applications/Xcode.app`, the Actions runner, one job then shutdown. The published image still has the hand-installed Xcode 27.1 until it is rebuilt. |
-| `macos-15` | macOS 15.6.1, Xcode 26.3 at `/Applications/Xcode.app`, the Actions runner, one job then shutdown. Published without Xcode until it is rebuilt. Xcode 27 requires macOS 26.6. |
+| `macos-15` | macOS 15.6.1, Xcode 26.3 at `/Applications/Xcode.app`, the Actions runner, one job then shutdown. The same logged-in session as `macos-26`. Published without Xcode or that session until it is rebuilt. Xcode 27 requires macOS 26.6. |
 
 A signing certificate is not in the image. A job imports one, as on
 GitHub-hosted runners.
 
 The guest user is `lume`, with passwordless sudo. The host passes the JIT
 config in through Lume's shared folder, and the VM shuts down after the job.
+The guest logs `lume` in at boot and starts the runner in that graphical
+session, after `testmanagerd` is running, so UI tests can drive the screen.
+The screen does not lock. The step it is on is `guest-status`, next to the
+JIT config. The published images do this after they are rebuilt.
 Building `macos-15` needs a Mac that can boot macOS 15. `macos-26` needs a
 Mac on macOS 26 or newer.
 
@@ -175,9 +179,10 @@ tests/test-image.sh gh-runner-images:ubuntu-24.04-tools tools
 Lint, as CI does:
 
 ```bash
-shellcheck -S style scripts/*.sh tests/*.sh tests/fake-runner/*.sh rootfs/usr/local/bin/entrypoint.sh .github/scripts/*.sh
+shellcheck -S style scripts/*.sh tests/*.sh tests/fake-runner/*.sh rootfs/usr/local/bin/entrypoint.sh .github/scripts/*.sh macos/*.sh
 tests/check-macos-runner.sh
 tests/check-macos-xcode.sh
+tests/check-macos-guest.sh
 ```
 
 ```bash

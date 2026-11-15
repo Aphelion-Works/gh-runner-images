@@ -190,9 +190,10 @@ done
 [[ $ready -eq 1 ]] || die "VM ${tag} did not accept ssh"
 quoted=$(printf '%q' "$password")
 guest_log="${work}/guest.log"
-# The lume user can write its home directory. /usr/local and LaunchDaemons
-# belong to root, and shutdown does too. A closed connection after the guest
-# has halted is exit 255, which is success once the marker is present.
+# The lume user can write its home directory, including its LaunchAgents.
+# /usr/local belongs to root, and shutdown does too. A closed connection
+# after the guest has halted is exit 255, which is success once the marker
+# is present.
 set +e
 DISPLAY=dummy SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force \
   GH_RUNNERS_MACOS_PASSWORD="$password" \
@@ -224,12 +225,24 @@ tar -xzf "${share}/actions-runner-osx-arm64-"*.tar.gz -C /Users/lume/actions-run
 chown -R lume:staff /Users/lume/actions-runner
 as_root install -d /usr/local/lib/gh-runners
 as_root install -m 0755 "${share}/start-runner.sh" /usr/local/lib/gh-runners/start-runner.sh
-as_root install -m 0644 "${share}/io.gh-runners.guest.plist" /Library/LaunchDaemons/io.gh-runners.guest.plist
+install -d -m 0755 /Users/lume/Library/LaunchAgents /Users/lume/Library/Logs
+install -m 0644 "${share}/io.gh-runners.guest.plist" /Users/lume/Library/LaunchAgents/io.gh-runners.guest.plist
 # as_root feeds sudo its own stdin, so the sudoers line has to be a file.
 printf 'lume ALL=(ALL) NOPASSWD: ALL\n' > /tmp/lume-sudoers
 as_root install -m 0440 /tmp/lume-sudoers /etc/sudoers.d/lume
 as_root visudo -cf /etc/sudoers.d/lume
 rm -f /tmp/lume-sudoers
+# UI tests need testmanagerd, which macOS starts only in a logged-in GUI
+# session. Auto-login opens that session on the next boot, and the
+# LaunchAgent starts the runner there. The screen must stay unlocked for
+# the whole job.
+as_root sysadminctl -autologin set -userName lume -password "$GH_RUNNERS_MACOS_PASSWORD" -adminUser lume -adminPassword "$GH_RUNNERS_MACOS_PASSWORD"
+as_root sysadminctl -screenLock off -password "$GH_RUNNERS_MACOS_PASSWORD"
+as_root defaults write /Library/Preferences/com.apple.screensaver loginWindowIdleTime -int 0
+defaults write com.apple.screensaver askForPassword -int 0
+defaults write com.apple.screensaver idleTime -int 0
+as_root pmset -a sleep 0 displaysleep 0 disksleep 0
+as_root /usr/sbin/DevToolsSecurity -enable
 cd /Users/lume
 xip --expand "${share}/Xcode_"*.xip
 [[ -d /Users/lume/Xcode.app ]] || { printf 'xip did not produce Xcode.app\n' >&2; exit 1; }

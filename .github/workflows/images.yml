@@ -32,9 +32,11 @@ jobs:
       - name: Install CI tools
         run: .github/scripts/install-ci-tools.sh
       - name: shellcheck
-        run: shellcheck -S style scripts/*.sh tests/*.sh tests/fake-runner/*.sh rootfs/usr/local/bin/entrypoint.sh .github/scripts/*.sh
+        run: shellcheck -S style scripts/*.sh tests/*.sh tests/fake-runner/*.sh rootfs/usr/local/bin/entrypoint.sh .github/scripts/*.sh macos/*.sh
       - name: macOS runner pin check
         run: tests/check-macos-runner.sh
+      - name: macOS guest session check
+        run: tests/check-macos-guest.sh
       - name: hadolint
         run: hadolint Dockerfile
       - name: actionlint
