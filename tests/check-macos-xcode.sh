@@ -38,8 +38,8 @@ check_pin() {
 
 check_pin macos-15 26.3 Xcode_26.3_Universal.xip \
   https://download.developer.apple.com/Developer_Tools/Xcode_26.3/Xcode_26.3_Universal.xip
-check_pin macos-26 27.2 Xcode_27.2_Universal.xip \
-  https://download.developer.apple.com/Developer_Tools/Xcode_27.2/Xcode_27.2_Universal.xip
+check_pin macos-26 27.2 Xcode_27.2.xip \
+  https://download.developer.apple.com/Developer_Tools/Xcode_27.2/Xcode_27.2.xip
 
 if grep -q 'xcode-select -s /Applications/Xcode.app' "$script"; then pass "selects Xcode.app"; else fail "selects Xcode.app"; fi
 if grep -q 'xcodebuild -license accept' "$script"; then pass "accepts the license"; else fail "accepts the license"; fi
