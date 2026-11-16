@@ -46,7 +46,19 @@ printf '%s\n' "$1" > "$RUNNER_LOG"
 printf '%s\n' "$2" >> "$RUNNER_LOG"
 exit 0
 EOF
-chmod 0755 "$bin/launchctl" "$bin/sudo" "$bin/run.sh"
+cat >"$bin/pgrep" <<'EOF'
+#!/bin/sh
+if [ "${PGREP_SETUP:-}" = 1 ]; then
+  exit 0
+fi
+exit 1
+EOF
+cat >"$bin/killall" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >> "$KILLALL_LOG"
+exit 0
+EOF
+chmod 0755 "$bin/launchctl" "$bin/sudo" "$bin/run.sh" "$bin/pgrep" "$bin/killall"
 
 run_guest() {
   env -i \
@@ -55,11 +67,15 @@ run_guest() {
     GH_RUNNERS_SHARE="$1" \
     GH_RUNNERS_RUNNER="$bin/run.sh" \
     GH_RUNNERS_WAIT_SECONDS="${2:-3}" \
+    GH_RUNNERS_SKIP_SETUP="${4:-$tmp/no-such-skip}" \
+    PGREP_SETUP="${5:-}" \
     LAUNCHCTL_LOG="$tmp/launchctl.log" \
     LAUNCHCTL_MODE="${3:-up}" \
     KICKED="$tmp/kicked" \
     SUDO_LOG="$tmp/sudo.log" \
     RUNNER_LOG="$tmp/runner.log" \
+    KILLALL_LOG="$tmp/killall.log" \
+    SKIP_LOG="$tmp/skip.log" \
     bash "$guest"
 }
 
@@ -93,6 +109,38 @@ if [[ $(cat "$tmp/share/gh-runners/guest-status") == "job finished" ]]; then
   pass "status records the job finishing"
 else
   fail "status records the job finishing" "$(cat "$tmp/share/gh-runners/guest-status" 2>/dev/null || true)"
+fi
+
+prepare_share
+rm -f "$tmp/killall.log" "$tmp/skip.log"
+cat >"$tmp/skip-setup" <<'EOF'
+#!/bin/sh
+printf 'ran\n' >> "$SKIP_LOG"
+exit 0
+EOF
+chmod 0755 "$tmp/skip-setup"
+status=0
+out=$(run_guest "$tmp/share" 3 up "$tmp/skip-setup" 1 2>&1) || status=$?
+if [[ $status -eq 0 ]]; then pass "open Setup Assistant does not stop the job"; else fail "open Setup Assistant does not stop the job" "$out"; fi
+if [[ $out == *"closing Setup Assistant"* ]]; then
+  pass "guest records an open Setup Assistant"
+else
+  fail "guest records an open Setup Assistant" "$out"
+fi
+if [[ $(cat "$tmp/killall.log" 2>/dev/null || true) == "Setup Assistant" ]]; then
+  pass "guest closes Setup Assistant"
+else
+  fail "guest closes Setup Assistant" "$(cat "$tmp/killall.log" 2>/dev/null || true)"
+fi
+if [[ $(cat "$tmp/skip.log" 2>/dev/null || true) == "ran" ]]; then
+  pass "guest marks Setup Assistant seen before the job"
+else
+  fail "guest marks Setup Assistant seen before the job" "$(cat "$tmp/skip.log" 2>/dev/null || true)"
+fi
+if [[ $(cat "$tmp/share/gh-runners/guest-status") == "job finished" ]]; then
+  pass "closing Setup Assistant still finishes the job"
+else
+  fail "closing Setup Assistant still finishes the job" "$(cat "$tmp/share/gh-runners/guest-status" 2>/dev/null || true)"
 fi
 
 prepare_share
@@ -160,6 +208,13 @@ fi
 if grep -q 'LSQuarantine -bool false' "$build"; then pass "image turns off the quarantine warning"; else fail "image turns off the quarantine warning"; fi
 if grep -q 'AutomaticCheckEnabled -bool false' "$build"; then pass "image turns off software update checks"; else fail "image turns off software update checks"; fi
 if grep -q 'com.apple.CrashReporter DialogType none' "$build"; then pass "image keeps crash reports out of a dialog"; else fail "image keeps crash reports out of a dialog"; fi
+if grep -q 'macos/skip-setup-assistant.sh' "$build" \
+  && grep -q '/usr/local/lib/gh-runners/skip-setup-assistant.sh' "$build" \
+  && grep -F -q '/skip-setup-assistant.sh"' "$build"; then
+  pass "image marks Setup Assistant seen"
+else
+  fail "image marks Setup Assistant seen"
+fi
 
 automation=$tmp/automation
 mark=$tmp/automation-ready
@@ -203,6 +258,91 @@ elif grep -q 'Authentication failed' "$rejected"; then
   pass "automation setup rejects a wrong password"
 else
   fail "automation setup rejects a wrong password" "$(cat "$rejected")"
+fi
+
+setup_bin=$tmp/setup-bin
+mkdir -p "$setup_bin" "$tmp/template/English.lproj/Library/Preferences"
+cat >"$setup_bin/sudo" <<'EOF'
+#!/bin/sh
+if [ "$1" = "-n" ] && [ "$2" = "true" ]; then
+  exit 0
+fi
+if [ "$1" = "-n" ]; then
+  shift
+  exec "$@"
+fi
+exit 1
+EOF
+cat >"$setup_bin/defaults" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >> "$DEFAULTS_LOG"
+exit 0
+EOF
+cat >"$setup_bin/strings" <<'EOF'
+#!/bin/sh
+printf '%s\n' noise DidSeeCloudSetup DidSeeIntelligence LastSeenBuddyBuildVersion LastSeenCloudProductVersion LastSeenIntelligenceProductVersion
+EOF
+cat >"$setup_bin/sw_vers" <<'EOF'
+#!/bin/sh
+case "$1" in
+  -productVersion) printf '26.6.2\n' ;;
+  -buildVersion) printf '25G83\n' ;;
+  *) exit 1 ;;
+esac
+EOF
+cat >"$setup_bin/killall" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >> "$KILLALL_LOG"
+exit 0
+EOF
+chmod 0755 "$setup_bin/sudo" "$setup_bin/defaults" "$setup_bin/strings" "$setup_bin/sw_vers" "$setup_bin/killall"
+assistant=$tmp/SetupAssistant
+printf '#!/bin/sh\n' >"$assistant"
+chmod 0755 "$assistant"
+: >"$tmp/defaults.log"
+: >"$tmp/setup-killall.log"
+run_skip() {
+  env -i \
+    PATH="$setup_bin:/usr/bin:/bin" \
+    GH_RUNNERS_DEFAULTS="$setup_bin/defaults" \
+    GH_RUNNERS_STRINGS="$setup_bin/strings" \
+    GH_RUNNERS_SETUP_ASSISTANT="$1" \
+    GH_RUNNERS_SETUP_SYSTEM="$tmp/system-setup" \
+    GH_RUNNERS_USER_TEMPLATE="$tmp/template" \
+    GH_RUNNERS_SETUP_DONE="$tmp/AppleSetupDone" \
+    DEFAULTS_LOG="$tmp/defaults.log" \
+    KILLALL_LOG="$tmp/setup-killall.log" \
+    bash "$root/macos/skip-setup-assistant.sh"
+}
+status=0
+out=$(run_skip "$assistant" 2>&1) || status=$?
+wrote() { grep -F -q "$1" "$tmp/defaults.log"; }
+if [[ $status -eq 0 ]] \
+  && wrote "write com.apple.SetupAssistant DidSeeCloudSetup -bool true" \
+  && wrote "write com.apple.SetupAssistant DidSeeIntelligence -bool true" \
+  && wrote "write com.apple.SetupAssistant LastSeenBuddyBuildVersion -string 25G83" \
+  && wrote "write com.apple.SetupAssistant LastSeenCloudProductVersion -string 26.6.2" \
+  && wrote "write com.apple.SetupAssistant LastSeenIntelligenceProductVersion -string 26.6.2" \
+  && wrote "write $tmp/system-setup LastSeenBuddyBuildVersion -string 25G83" \
+  && wrote "write $tmp/template/English.lproj/Library/Preferences/com.apple.SetupAssistant DidSeeCloudSetup -bool true" \
+  && ! wrote "noise" \
+  && [[ -f $tmp/AppleSetupDone ]] \
+  && [[ $(cat "$tmp/setup-killall.log") == "Setup Assistant" ]]; then
+  pass "setup screens are marked seen for the user, the system, and new accounts"
+else
+  fail "setup screens are marked seen for the user, the system, and new accounts" "${out}$(printf '\n')$(cat "$tmp/defaults.log" 2>/dev/null || true)"
+fi
+
+: >"$tmp/defaults.log"
+status=0
+out=$(run_skip "$tmp/missing-assistant" 2>&1) || status=$?
+if [[ $status -eq 0 ]] \
+  && wrote "write com.apple.SetupAssistant LastSeenBuddyBuildVersion -string 25G83" \
+  && wrote "write com.apple.SetupAssistant LastSeenCloudProductVersion -string 26.6.2" \
+  && ! wrote "DidSee"; then
+  pass "setup screens stay marked seen when the assistant cannot be read"
+else
+  fail "setup screens stay marked seen when the assistant cannot be read" "${out}$(printf '\n')$(cat "$tmp/defaults.log" 2>/dev/null || true)"
 fi
 
 if [[ $fails -ne 0 ]]; then

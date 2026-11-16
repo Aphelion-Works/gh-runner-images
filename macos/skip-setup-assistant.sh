@@ -1,0 +1,78 @@
+#!/bin/bash
+# Marks every Setup Assistant screen as already seen.
+#
+# A guest that only finished the first-boot assistant still opens the per-user
+# one (Siri, Screen Time, Apple Intelligence, Appearance) after auto-login.
+# That window stays in front, so XCTest finds the app under test in the
+# background and cannot click it.
+#
+# The key names come from the guest's own Setup Assistant binary, so a newer
+# macOS that adds a screen is covered without editing this script. The two
+# version keys are always written, even when the binary cannot be read.
+set -euo pipefail
+
+defaults=${GH_RUNNERS_DEFAULTS:-defaults}
+strings=${GH_RUNNERS_STRINGS:-strings}
+assistant=${GH_RUNNERS_SETUP_ASSISTANT:-/System/Library/CoreServices/Setup Assistant.app/Contents/MacOS/Setup Assistant}
+system_domain=${GH_RUNNERS_SETUP_SYSTEM:-/Library/Preferences/com.apple.SetupAssistant}
+template_root=${GH_RUNNERS_USER_TEMPLATE:-/Library/User Template}
+done_file=${GH_RUNNERS_SETUP_DONE:-/var/db/.AppleSetupDone}
+
+as_root() {
+  if sudo -n true >/dev/null 2>&1; then
+    sudo -n "$@"
+  else
+    printf '%s\n' "${GH_RUNNERS_MACOS_PASSWORD:-}" | sudo -S -p '' "$@"
+  fi
+}
+
+version=$(sw_vers -productVersion)
+build=$(sw_vers -buildVersion)
+
+keys=()
+if [[ -x $assistant ]]; then
+  while IFS= read -r key; do
+    [[ -n $key ]] && keys+=("$key")
+  done < <("$strings" -a "$assistant" | grep -E '^(DidSee|LastSeen)' | sort -u)
+fi
+
+have_key() {
+  local want=$1 key
+  for key in "${keys[@]+"${keys[@]}"}"; do
+    [[ $key == "$want" ]] && return 0
+  done
+  return 1
+}
+have_key LastSeenBuddyBuildVersion || keys+=(LastSeenBuddyBuildVersion)
+have_key LastSeenCloudProductVersion || keys+=(LastSeenCloudProductVersion)
+
+apply_domain() {
+  local domain=$1 root=$2 key
+  local -a args
+  for key in "${keys[@]}"; do
+    if [[ $key == DidSee* ]]; then
+      args=(-bool true)
+    elif [[ $key == *Build* ]]; then
+      args=(-string "$build")
+    else
+      args=(-string "$version")
+    fi
+    if [[ $root -eq 1 ]]; then
+      as_root "$defaults" write "$domain" "$key" "${args[@]}"
+    else
+      "$defaults" write "$domain" "$key" "${args[@]}"
+    fi
+  done
+}
+
+apply_domain com.apple.SetupAssistant 0
+apply_domain "$system_domain" 1
+
+shopt -s nullglob
+for template in "$template_root"/*/Library/Preferences; do
+  apply_domain "$template/com.apple.SetupAssistant" 1
+done
+
+as_root touch "$done_file"
+# Quit it now, so a window that was already open is not saved into the disk.
+killall "Setup Assistant" >/dev/null 2>&1 || true

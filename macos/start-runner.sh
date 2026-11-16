@@ -62,6 +62,18 @@ if [[ $ready -ne 1 ]]; then
   exit 1
 fi
 
+# Setup Assistant, when it is still open, owns the screen. XCTest then sees
+# the app under test in the background and every click fails. Mark the
+# screens seen again (a newer macOS may have added one) and close the window
+# before the job starts.
+skip=${GH_RUNNERS_SKIP_SETUP:-/usr/local/lib/gh-runners/skip-setup-assistant.sh}
+if [[ -x $skip ]]; then
+  if pgrep -x "Setup Assistant" >/dev/null 2>&1; then
+    note "closing Setup Assistant"
+  fi
+  "$skip"
+  killall "Setup Assistant" >/dev/null 2>&1 || true
+fi
 note "starting runner"
 "$runner" --jitconfig "$(cat "$cfg")"
 note "job finished"

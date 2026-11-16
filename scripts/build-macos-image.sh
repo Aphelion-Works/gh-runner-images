@@ -123,6 +123,7 @@ fi
 [[ -f $xip ]] || die "Xcode archive ${xip} does not exist"
 cp "$xip" "${share}/${xcode_file}"
 install -m 0755 "${root}/macos/start-runner.sh" "${share}/start-runner.sh"
+install -m 0755 "${root}/macos/skip-setup-assistant.sh" "${share}/skip-setup-assistant.sh"
 install -m 0755 "${root}/macos/enable-automation.sh" "${share}/enable-automation.sh"
 install -m 0644 "${root}/macos/io.gh-runners.guest.plist" "${share}/io.gh-runners.guest.plist"
 
@@ -244,6 +245,11 @@ as_root /usr/sbin/DevToolsSecurity -enable
 # the admin password before it will drive the UI. Answer that once, here,
 # so a job does not sit on the prompt until Xcode gives up.
 "${share}/enable-automation.sh"
+# The per-user Setup Assistant opens after auto-login and stays in front of
+# UI tests. Mark every screen seen for lume and for accounts created later,
+# and keep the script so a job can do it again if a newer macOS adds a screen.
+as_root install -m 0755 "${share}/skip-setup-assistant.sh" /usr/local/lib/gh-runners/skip-setup-assistant.sh
+"${share}/skip-setup-assistant.sh"
 # A job has nobody to click a dialog. These are the ones a fresh guest
 # raises: the quarantine warning, Software Update, and Crash Reporter.
 # Crash reports still land in DiagnosticReports.
