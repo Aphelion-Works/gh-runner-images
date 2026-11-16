@@ -62,19 +62,51 @@ if [[ $ready -ne 1 ]]; then
   exit 1
 fi
 
-# Setup Assistant, when it is still open, owns the screen. XCTest then sees
-# the app under test in the background and every click fails. Mark the
-# screens seen again (a newer macOS may have added one) and close the window
-# before the job starts.
+# Setup Assistant owns the screen when it is open, so XCTest leaves the app
+# under test in the background. macOS can open it after the runner has
+# started, and again after it has been closed. Mark the screens seen, then
+# keep closing it until the job ends.
 skip=${GH_RUNNERS_SKIP_SETUP:-/usr/local/lib/gh-runners/skip-setup-assistant.sh}
-if [[ -x $skip ]]; then
-  if pgrep -x "Setup Assistant" >/dev/null 2>&1; then
+interval=${GH_RUNNERS_SETUP_INTERVAL:-2}
+if [[ ! $interval =~ ^[0-9]+$ ]]; then
+  interval=2
+fi
+setup_open() {
+  pgrep -x "Setup Assistant" >/dev/null 2>&1 && return 0
+  pgrep -f "/Setup Assistant.app/" >/dev/null 2>&1
+}
+close_setup_assistant() {
+  if setup_open; then
     note "closing Setup Assistant"
+    killall "Setup Assistant" >/dev/null 2>&1 || true
   fi
-  "$skip"
-  killall "Setup Assistant" >/dev/null 2>&1 || true
+}
+watch_setup_assistant() {
+  while true; do
+    close_setup_assistant
+    sleep "$interval"
+  done
+}
+watcher=
+stop_watcher() {
+  if [[ -z ${watcher:-} ]]; then
+    return 0
+  fi
+  local pid=$watcher
+  watcher=
+  kill "$pid" >/dev/null 2>&1 || true
+  wait "$pid" 2>/dev/null || true
+}
+if [[ -x $skip ]]; then
+  "$skip" || note "could not mark Setup Assistant seen"
+  close_setup_assistant
+  watch_setup_assistant &
+  watcher=$!
+  trap stop_watcher EXIT
 fi
 note "starting runner"
 "$runner" --jitconfig "$(cat "$cfg")"
+stop_watcher
+trap - EXIT
 note "job finished"
 sudo -n shutdown -h now

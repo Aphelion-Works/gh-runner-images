@@ -57,8 +57,9 @@ config in through Lume's shared folder, and the VM shuts down after the job.
 The guest logs `lume` in at boot and starts the runner in that graphical
 session, after `testmanagerd` is running, so UI tests can drive the screen.
 XCTest can turn on UI automation without a password. Setup Assistant is
-marked already seen for `lume` and for accounts created later, and a job
-closes it if it is still open. An open Setup Assistant window keeps the
+marked already seen for `lume` and for accounts created later, including
+the keys `mbuseragent` uses to resume an unfinished setup. A job keeps
+closing it if it opens again. An open Setup Assistant window keeps the
 app under test in the background. The download
 quarantine warning, software-update checks, and crash dialogs are off.
 Gatekeeper's "Anywhere" switch is a System Settings confirmation on

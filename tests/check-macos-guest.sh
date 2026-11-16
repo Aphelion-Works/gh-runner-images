@@ -127,7 +127,7 @@ if [[ $out == *"closing Setup Assistant"* ]]; then
 else
   fail "guest records an open Setup Assistant" "$out"
 fi
-if [[ $(cat "$tmp/killall.log" 2>/dev/null || true) == "Setup Assistant" ]]; then
+if grep -q '^Setup Assistant$' "$tmp/killall.log" 2>/dev/null; then
   pass "guest closes Setup Assistant"
 else
   fail "guest closes Setup Assistant" "$(cat "$tmp/killall.log" 2>/dev/null || true)"
@@ -275,6 +275,7 @@ exit 1
 EOF
 cat >"$setup_bin/defaults" <<'EOF'
 #!/bin/sh
+printf 'defaults %s\n' "$*" >> "$SEQUENCE"
 printf '%s\n' "$*" >> "$DEFAULTS_LOG"
 exit 0
 EOF
@@ -292,6 +293,7 @@ esac
 EOF
 cat >"$setup_bin/killall" <<'EOF'
 #!/bin/sh
+printf 'killall %s\n' "$*" >> "$SEQUENCE"
 printf '%s\n' "$*" >> "$KILLALL_LOG"
 exit 0
 EOF
@@ -301,6 +303,7 @@ printf '#!/bin/sh\n' >"$assistant"
 chmod 0755 "$assistant"
 : >"$tmp/defaults.log"
 : >"$tmp/setup-killall.log"
+: >"$tmp/sequence"
 run_skip() {
   env -i \
     PATH="$setup_bin:/usr/bin:/bin" \
@@ -312,6 +315,7 @@ run_skip() {
     GH_RUNNERS_SETUP_DONE="$tmp/AppleSetupDone" \
     DEFAULTS_LOG="$tmp/defaults.log" \
     KILLALL_LOG="$tmp/setup-killall.log" \
+    SEQUENCE="$tmp/sequence" \
     bash "$root/macos/skip-setup-assistant.sh"
 }
 status=0
@@ -325,9 +329,16 @@ if [[ $status -eq 0 ]] \
   && wrote "write com.apple.SetupAssistant LastSeenIntelligenceProductVersion -string 26.6.2" \
   && wrote "write $tmp/system-setup LastSeenBuddyBuildVersion -string 25G83" \
   && wrote "write $tmp/template/English.lproj/Library/Preferences/com.apple.SetupAssistant DidSeeCloudSetup -bool true" \
+  && wrote "write com.apple.SetupAssistant MiniBuddyShouldLaunchToResumeSetup -bool false" \
+  && wrote "write com.apple.SetupAssistant MiniBuddyLaunchReason -int 0" \
+  && wrote "write com.apple.SetupAssistant LastPreLoginTasksPerformedBuild -string 25G83" \
+  && wrote "write com.apple.SetupAssistant LastPreLoginTasksPerformedVersion -string 26.6.2" \
+  && wrote "write com.apple.SetupAssistant SkipFirstLoginOptimization -bool true" \
+  && wrote "write com.apple.SetupAssistant LastPrivacyBundleVersion -string 26.6.2" \
   && ! wrote "noise" \
   && [[ -f $tmp/AppleSetupDone ]] \
-  && [[ $(cat "$tmp/setup-killall.log") == "Setup Assistant" ]]; then
+  && [[ $(head -n 1 "$tmp/sequence") == "killall Setup Assistant" ]] \
+  && [[ $(tail -n 1 "$tmp/sequence") == "killall Setup Assistant" ]]; then
   pass "setup screens are marked seen for the user, the system, and new accounts"
 else
   fail "setup screens are marked seen for the user, the system, and new accounts" "${out}$(printf '\n')$(cat "$tmp/defaults.log" 2>/dev/null || true)"
@@ -339,6 +350,7 @@ out=$(run_skip "$tmp/missing-assistant" 2>&1) || status=$?
 if [[ $status -eq 0 ]] \
   && wrote "write com.apple.SetupAssistant LastSeenBuddyBuildVersion -string 25G83" \
   && wrote "write com.apple.SetupAssistant LastSeenCloudProductVersion -string 26.6.2" \
+  && wrote "write com.apple.SetupAssistant MiniBuddyShouldLaunchToResumeSetup -bool false" \
   && ! wrote "DidSee"; then
   pass "setup screens stay marked seen when the assistant cannot be read"
 else

@@ -46,6 +46,16 @@ have_key() {
 have_key LastSeenBuddyBuildVersion || keys+=(LastSeenBuddyBuildVersion)
 have_key LastSeenCloudProductVersion || keys+=(LastSeenCloudProductVersion)
 
+write_pref() {
+  local domain=$1 root=$2 key=$3
+  shift 3
+  if [[ $root -eq 1 ]]; then
+    as_root "$defaults" write "$domain" "$key" "$@"
+  else
+    "$defaults" write "$domain" "$key" "$@"
+  fi
+}
+
 apply_domain() {
   local domain=$1 root=$2 key
   local -a args
@@ -57,14 +67,22 @@ apply_domain() {
     else
       args=(-string "$version")
     fi
-    if [[ $root -eq 1 ]]; then
-      as_root "$defaults" write "$domain" "$key" "${args[@]}"
-    else
-      "$defaults" write "$domain" "$key" "${args[@]}"
-    fi
+    write_pref "$domain" "$root" "$key" "${args[@]}"
   done
+  # mbuseragent reads these at login. A partial `lume setup --unattended`
+  # leaves MiniBuddyShouldLaunchToResumeSetup set, and the per-user Setup
+  # Assistant opens again even when every DidSee key is true.
+  write_pref "$domain" "$root" MiniBuddyShouldLaunchToResumeSetup -bool false
+  write_pref "$domain" "$root" MiniBuddyLaunchReason -int 0
+  write_pref "$domain" "$root" LastPreLoginTasksPerformedBuild -string "$build"
+  write_pref "$domain" "$root" LastPreLoginTasksPerformedVersion -string "$version"
+  write_pref "$domain" "$root" SkipFirstLoginOptimization -bool true
+  write_pref "$domain" "$root" LastPrivacyBundleVersion -string "$version"
 }
 
+# Close it before writing. A running assistant saves its own "not finished"
+# values on the way out and would overwrite the keys below.
+killall "Setup Assistant" >/dev/null 2>&1 || true
 apply_domain com.apple.SetupAssistant 0
 apply_domain "$system_domain" 1
 
