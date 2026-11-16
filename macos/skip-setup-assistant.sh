@@ -17,6 +17,8 @@ assistant=${GH_RUNNERS_SETUP_ASSISTANT:-/System/Library/CoreServices/Setup Assis
 system_domain=${GH_RUNNERS_SETUP_SYSTEM:-/Library/Preferences/com.apple.SetupAssistant}
 template_root=${GH_RUNNERS_USER_TEMPLATE:-/Library/User Template}
 done_file=${GH_RUNNERS_SETUP_DONE:-/var/db/.AppleSetupDone}
+diagnostics_file=${GH_RUNNERS_DIAGNOSTICS_DONE:-/var/db/.AppleDiagnosticsSetupDone}
+skip_buddy=${GH_RUNNERS_SKIP_BUDDY:-${HOME:-/Users/lume}/.skipbuddy}
 
 as_root() {
   if sudo -n true >/dev/null 2>&1; then
@@ -78,11 +80,22 @@ apply_domain() {
   write_pref "$domain" "$root" LastPreLoginTasksPerformedVersion -string "$version"
   write_pref "$domain" "$root" SkipFirstLoginOptimization -bool true
   write_pref "$domain" "$root" LastPrivacyBundleVersion -string "$version"
+  # A completed walkthrough leaves these. FileVault and the post-clone
+  # "new Mac" screens open when they are missing.
+  write_pref "$domain" "$root" selectedFDEEscrowType -string DeclinedFDE
+  write_pref "$domain" "$root" MiniBuddyLaunchedPostMigration -bool true
+}
+
+# macOS 26 names the process SetupAssistantSpringboard. killall of
+# "Setup Assistant" does not match that, so both have to be quit.
+quit_setup_assistant() {
+  killall "Setup Assistant" >/dev/null 2>&1 || true
+  killall SetupAssistantSpringboard >/dev/null 2>&1 || true
 }
 
 # Close it before writing. A running assistant saves its own "not finished"
 # values on the way out and would overwrite the keys below.
-killall "Setup Assistant" >/dev/null 2>&1 || true
+quit_setup_assistant
 apply_domain com.apple.SetupAssistant 0
 apply_domain "$system_domain" 1
 
@@ -90,7 +103,18 @@ shopt -s nullglob
 for template in "$template_root"/*/Library/Preferences; do
   apply_domain "$template/com.apple.SetupAssistant" 1
 done
+for home in "$template_root"/*/; do
+  as_root touch "${home}.skipbuddy"
+done
 
 as_root touch "$done_file"
+as_root touch "$diagnostics_file"
+# .skipbuddy is what macOS 26 checks in a user's home before opening the
+# per-user assistant. An empty home is treated as unfinished.
+touch "$skip_buddy"
 # Quit it now, so a window that was already open is not saved into the disk.
-killall "Setup Assistant" >/dev/null 2>&1 || true
+quit_setup_assistant
+# Per-host loginwindow key. A finished Setup Assistant leaves this false.
+# It has to be written after the assistant has quit, because quitting writes
+# the in-memory "still launching" value back over it.
+"$defaults" -currentHost write com.apple.loginwindow MiniBuddyLaunch -bool false

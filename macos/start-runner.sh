@@ -73,12 +73,14 @@ if [[ ! $interval =~ ^[0-9]+$ ]]; then
 fi
 setup_open() {
   pgrep -x "Setup Assistant" >/dev/null 2>&1 && return 0
+  pgrep -x SetupAssistantSpringboard >/dev/null 2>&1 && return 0
   pgrep -f "/Setup Assistant.app/" >/dev/null 2>&1
 }
 close_setup_assistant() {
   if setup_open; then
     note "closing Setup Assistant"
     killall "Setup Assistant" >/dev/null 2>&1 || true
+    killall SetupAssistantSpringboard >/dev/null 2>&1 || true
   fi
 }
 watch_setup_assistant() {

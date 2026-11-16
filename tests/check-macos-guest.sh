@@ -313,6 +313,8 @@ run_skip() {
     GH_RUNNERS_SETUP_SYSTEM="$tmp/system-setup" \
     GH_RUNNERS_USER_TEMPLATE="$tmp/template" \
     GH_RUNNERS_SETUP_DONE="$tmp/AppleSetupDone" \
+    GH_RUNNERS_DIAGNOSTICS_DONE="$tmp/AppleDiagnosticsSetupDone" \
+    GH_RUNNERS_SKIP_BUDDY="$tmp/skipbuddy" \
     DEFAULTS_LOG="$tmp/defaults.log" \
     KILLALL_LOG="$tmp/setup-killall.log" \
     SEQUENCE="$tmp/sequence" \
@@ -335,10 +337,17 @@ if [[ $status -eq 0 ]] \
   && wrote "write com.apple.SetupAssistant LastPreLoginTasksPerformedVersion -string 26.6.2" \
   && wrote "write com.apple.SetupAssistant SkipFirstLoginOptimization -bool true" \
   && wrote "write com.apple.SetupAssistant LastPrivacyBundleVersion -string 26.6.2" \
+  && wrote "write com.apple.SetupAssistant selectedFDEEscrowType -string DeclinedFDE" \
+  && wrote "write com.apple.SetupAssistant MiniBuddyLaunchedPostMigration -bool true" \
+  && wrote "-currentHost write com.apple.loginwindow MiniBuddyLaunch -bool false" \
   && ! wrote "noise" \
   && [[ -f $tmp/AppleSetupDone ]] \
+  && [[ -f $tmp/AppleDiagnosticsSetupDone ]] \
+  && [[ -f $tmp/skipbuddy ]] \
+  && [[ -f $tmp/template/English.lproj/.skipbuddy ]] \
+  && grep -F -q 'SetupAssistantSpringboard' "$tmp/setup-killall.log" \
   && [[ $(head -n 1 "$tmp/sequence") == "killall Setup Assistant" ]] \
-  && [[ $(tail -n 1 "$tmp/sequence") == "killall Setup Assistant" ]]; then
+  && [[ $(tail -n 1 "$tmp/sequence") == "defaults -currentHost write com.apple.loginwindow MiniBuddyLaunch -bool false" ]]; then
   pass "setup screens are marked seen for the user, the system, and new accounts"
 else
   fail "setup screens are marked seen for the user, the system, and new accounts" "${out}$(printf '\n')$(cat "$tmp/defaults.log" 2>/dev/null || true)"
