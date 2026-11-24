@@ -119,8 +119,6 @@ jobs:
           load: true
           provenance: false
           tags: local/${{ matrix.name }}
-          cache-from: type=gha,scope=${{ matrix.name }}-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.name }}-${{ matrix.arch }}
           build-args: ${{ steps.args.outputs.list }}
 
       - name: Test
@@ -158,9 +156,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      # Same inputs as the tested build, so every layer comes from its cache.
-      # Pushed by digest only. The manifest job publishes the tags once both
-      # architectures exist, so one architecture cannot replace the other.
+      # Repeats the tested build and pushes by digest only. No Actions cache:
+      # those layer caches filled the account's Actions storage. The manifest
+      # job publishes the tags once both architectures exist, so one
+      # architecture cannot replace the other.
       - name: Publish by digest
         if: env.PUBLISH == 'true'
         id: push
@@ -170,7 +169,6 @@ jobs:
           platforms: linux/${{ matrix.arch }}
           provenance: false
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=${{ matrix.name }}-${{ matrix.arch }}
           build-args: ${{ steps.args.outputs.list }}
 
       - name: Export digest
@@ -196,6 +194,7 @@ jobs:
         with:
           name: digest-${{ matrix.name }}-${{ matrix.arch }}
           path: ${{ runner.temp }}/digests/*
+          retention-days: 1
           if-no-files-found: error
 
       - name: Upload SBOM
@@ -204,6 +203,7 @@ jobs:
         with:
           name: sbom-${{ matrix.name }}-${{ matrix.arch }}
           path: sbom.spdx.json
+          retention-days: 1
           if-no-files-found: error
 
   manifest:
