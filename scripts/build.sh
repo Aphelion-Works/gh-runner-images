@@ -7,6 +7,7 @@
 #   gh-runner-images:<image>. CI builds the same way through the workflow.
 #
 #   scripts/build.sh ubuntu-24.04-tools --platform linux/amd64
+#   scripts/build.sh ubuntu-24.04-tools --platform linux/arm64
 # =============================================================================
 set -euo pipefail
 cd "$(dirname "$0")/.."

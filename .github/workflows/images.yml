@@ -1,5 +1,7 @@
-# Builds, tests, scans and publishes the Linux runner images.
-# Pull requests publish nothing. main and the daily run publish to ghcr.io.
+# Builds, tests, scans and publishes the Linux runner images for linux/amd64
+# and linux/arm64. Each architecture is built and tested on its own, then one
+# manifest list is published under the existing tags. Pull requests publish
+# nothing. main and the daily run publish to ghcr.io.
 # OS packages refresh weekly (OS_REFRESH is the ISO week).
 # Runs on GitHub-hosted runners, never on the runners that use these images.
 name: Images
@@ -37,6 +39,10 @@ jobs:
         run: tests/check-macos-runner.sh
       - name: macOS guest session check
         run: tests/check-macos-guest.sh
+      - name: Linux platform check
+        run: tests/check-linux-platforms.sh
+      - name: CI tool pin check
+        run: tests/check-ci-tools.sh
       - name: hadolint
         run: hadolint Dockerfile
       - name: actionlint
@@ -44,20 +50,21 @@ jobs:
 
   image:
     needs: lint
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
-      id-token: write
-      attestations: write
       security-events: write
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { name: ubuntu-24.04, ubuntu: "24.04", variant: base, image_os: ubuntu24 }
-          - { name: ubuntu-24.04-tools, ubuntu: "24.04", variant: tools, image_os: ubuntu24 }
-          - { name: ubuntu-26.04, ubuntu: "26.04", variant: base, image_os: ubuntu26 }
+          - { name: ubuntu-24.04, ubuntu: "24.04", variant: base, image_os: ubuntu24, arch: amd64, runner: ubuntu-24.04 }
+          - { name: ubuntu-24.04, ubuntu: "24.04", variant: base, image_os: ubuntu24, arch: arm64, runner: ubuntu-24.04-arm }
+          - { name: ubuntu-24.04-tools, ubuntu: "24.04", variant: tools, image_os: ubuntu24, arch: amd64, runner: ubuntu-24.04 }
+          - { name: ubuntu-24.04-tools, ubuntu: "24.04", variant: tools, image_os: ubuntu24, arch: arm64, runner: ubuntu-24.04-arm }
+          - { name: ubuntu-26.04, ubuntu: "26.04", variant: base, image_os: ubuntu26, arch: amd64, runner: ubuntu-24.04 }
+          - { name: ubuntu-26.04, ubuntu: "26.04", variant: base, image_os: ubuntu26, arch: arm64, runner: ubuntu-24.04-arm }
     env:
       PUBLISH: ${{ github.event_name != 'pull_request' }}
     steps:
@@ -107,13 +114,13 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          platforms: linux/amd64
+          platforms: linux/${{ matrix.arch }}
           pull: true
           load: true
           provenance: false
           tags: local/${{ matrix.name }}
-          cache-from: type=gha,scope=${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          cache-from: type=gha,scope=${{ matrix.name }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}-${{ matrix.arch }}
           build-args: ${{ steps.args.outputs.list }}
 
       - name: Test
@@ -141,7 +148,7 @@ jobs:
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: trivy.sarif
-          category: trivy-${{ matrix.name }}
+          category: trivy-${{ matrix.name }}-${{ matrix.arch }}
 
       - name: Log in to ghcr.io
         if: env.PUBLISH == 'true'
@@ -152,35 +159,137 @@ jobs:
           password: ${{ github.token }}
 
       # Same inputs as the tested build, so every layer comes from its cache.
-      - name: Publish
+      # Pushed by digest only. The manifest job publishes the tags once both
+      # architectures exist, so one architecture cannot replace the other.
+      - name: Publish by digest
         if: env.PUBLISH == 'true'
         id: push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          platforms: linux/amd64
-          push: true
+          platforms: linux/${{ matrix.arch }}
           provenance: false
-          tags: |
-            ${{ env.IMAGE }}:${{ matrix.name }}
-            ${{ env.IMAGE }}:${{ matrix.name }}-${{ steps.v.outputs.RUNNER_VERSION }}
-            ${{ env.IMAGE }}:${{ matrix.name }}-${{ steps.v.outputs.RUNNER_VERSION }}-${{ steps.v.outputs.DATE }}
-          cache-from: type=gha,scope=${{ matrix.name }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.name }}-${{ matrix.arch }}
           build-args: ${{ steps.args.outputs.list }}
 
-      - name: Attest build provenance
+      - name: Export digest
         if: env.PUBLISH == 'true'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          ARCH: ${{ matrix.arch }}
+          RUNNER_VERSION: ${{ steps.v.outputs.RUNNER_VERSION }}
+          DATE: ${{ steps.v.outputs.DATE }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "missing image digest" >&2; exit 1; }
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+          if [ "$ARCH" = amd64 ]; then
+            printf '%s\n' "$RUNNER_VERSION" > "$RUNNER_TEMP/digests/runner-version"
+            printf '%s\n' "$DATE" > "$RUNNER_TEMP/digests/build-date"
+          fi
+
+      - name: Upload digest
+        if: env.PUBLISH == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digest-${{ matrix.name }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+
+      - name: Upload SBOM
+        if: env.PUBLISH == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom-${{ matrix.name }}-${{ matrix.arch }}
+          path: sbom.spdx.json
+          if-no-files-found: error
+
+  manifest:
+    needs: image
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [ubuntu-24.04, ubuntu-24.04-tools, ubuntu-26.04]
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: digest-${{ matrix.name }}-*
+          merge-multiple: true
+          path: digests
+
+      - name: Download SBOMs
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: sbom-${{ matrix.name }}-*
+          path: sboms
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Publish multi-arch tags
+        id: index
+        env:
+          NAME: ${{ matrix.name }}
+        run: |
+          set -euo pipefail
+          ver=$(tr -d '[:space:]' < digests/runner-version)
+          date=$(tr -d '[:space:]' < digests/build-date)
+          [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "bad runner version: $ver" >&2; exit 1; }
+          [[ "$date" =~ ^[0-9]{8}$ ]] || { echo "bad build date: $date" >&2; exit 1; }
+          args=()
+          for f in digests/*; do
+            base=$(basename "$f")
+            case "$base" in
+              runner-version|build-date) continue ;;
+            esac
+            [[ "$base" =~ ^[0-9a-f]{64}$ ]] || { echo "unexpected digest file: $base" >&2; exit 1; }
+            args+=("${IMAGE}@sha256:${base}")
+          done
+          [ "${#args[@]}" -eq 2 ] || { echo "expected amd64 and arm64 digests, got ${#args[@]}" >&2; exit 1; }
+          docker buildx imagetools create \
+            -t "${IMAGE}:${NAME}" \
+            -t "${IMAGE}:${NAME}-${ver}" \
+            -t "${IMAGE}:${NAME}-${ver}-${date}" \
+            "${args[@]}"
+          digest=$(docker buildx imagetools inspect "${IMAGE}:${NAME}" --format '{{json .Manifest}}' | jq -er '.digest')
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "could not read index digest: $digest" >&2; exit 1; }
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE }}
-          subject-digest: ${{ steps.push.outputs.digest }}
+          subject-digest: ${{ steps.index.outputs.digest }}
           push-to-registry: true
 
-      - name: Attest SBOM
-        if: env.PUBLISH == 'true'
+      - name: Attest amd64 SBOM
         uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
           subject-name: ${{ env.IMAGE }}
-          subject-digest: ${{ steps.push.outputs.digest }}
-          sbom-path: sbom.spdx.json
+          subject-digest: ${{ steps.index.outputs.digest }}
+          sbom-path: sboms/sbom-${{ matrix.name }}-amd64/sbom.spdx.json
+          push-to-registry: true
+
+      - name: Attest arm64 SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.index.outputs.digest }}
+          sbom-path: sboms/sbom-${{ matrix.name }}-arm64/sbom.spdx.json
           push-to-registry: true

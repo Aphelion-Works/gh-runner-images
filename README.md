@@ -15,7 +15,8 @@ work and are wiped with the container. Jobs run as the non-root `runner` user
 
 ## Images
 
-`ghcr.io/aphelion-works/gh-runner-images:<tag>`, linux/amd64:
+`ghcr.io/aphelion-works/gh-runner-images:<tag>`, linux/amd64 and linux/arm64.
+One tag is both architectures. A host pulls the image that matches its CPU:
 
 | Tag | Contents |
 |---|---|
@@ -183,6 +184,7 @@ the Docker-in-Docker check, but no GitHub access: the runner's `config.sh` and
 
 ```bash
 scripts/build.sh ubuntu-24.04-tools        # builds gh-runner-images:ubuntu-24.04-tools
+scripts/build.sh ubuntu-24.04-tools --platform linux/arm64
 tests/test-image.sh gh-runner-images:ubuntu-24.04-tools tools
 ```
 
