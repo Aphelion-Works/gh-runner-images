@@ -41,6 +41,8 @@ jobs:
         run: tests/check-macos-guest.sh
       - name: Linux platform check
         run: tests/check-linux-platforms.sh
+      - name: CI tool pin check
+        run: tests/check-ci-tools.sh
       - name: hadolint
         run: hadolint Dockerfile
       - name: actionlint
