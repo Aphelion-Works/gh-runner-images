@@ -41,6 +41,21 @@ else
   pass "no build is pinned to linux/amd64"
 fi
 
+if grep -F 'pattern: digest-' "$wf" || grep -F 'pattern: sbom-' "$wf"; then
+  fail "artifact patterns treat ubuntu-24.04-tools as ubuntu-24.04"
+else
+  pass "artifact downloads are not prefix patterns"
+fi
+
+for arch in amd64 arm64; do
+  if grep -Fq "name: digest-\${{ matrix.name }}-${arch}" "$wf" \
+    && grep -Fq "name: sbom-\${{ matrix.name }}-${arch}" "$wf"; then
+    pass "manifest downloads the $arch digest and SBOM by exact name"
+  else
+    fail "manifest downloads the $arch digest and SBOM by exact name"
+  fi
+done
+
 if [ "$fails" -ne 0 ]; then
   printf '%d check(s) failed\n' "$fails" >&2
   exit 1
